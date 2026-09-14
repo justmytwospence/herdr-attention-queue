@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        # 3.9 is the oldest interpreter the plugin supports (Debian 11).
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install Python
+        run: uv python install ${{ matrix.python }}
+      - name: Compile
+        run: uv run --no-project --python ${{ matrix.python }} python -m py_compile attention.py attention_queue/*.py tests/*.py scripts/*.py
+      - name: Test
+        run: uv run --no-project --python ${{ matrix.python }} python -W error -m unittest discover -s tests -t . -v
