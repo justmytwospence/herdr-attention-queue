@@ -1,0 +1,44 @@
+# Client-side herdr config for herdr-attention-queue. The plugin reports tokens
+# and an Agents view; how rows look and which keys invoke actions is config on
+# the machine running the herdr client. Merge into ~/.config/herdr/config.toml,
+# then `herdr server reload-config` (or the UI's reload config action).
+
+[ui]
+# With more than one herdr machine connected, herdr 0.9.0's "priority" sort
+# re-sorts the combined Agents list itself and discards plugin views. "spaces"
+# keeps each server's view order (local machine first).
+agent_panel_sort = "spaces"
+
+[ui.sidebar.agents]
+# $attn is the plugin's sticky attention state. state_icon is left out: it shows
+# herdr's own status, which reads idle for an agent the plugin keeps done.
+rows = [
+  [{ token = "$attn", rules = [
+    { equals = "blocked", fg = "#cc6666", bold = true },
+    { equals = "done", fg = "#a78300", bold = true },
+    { equals = "working", fg = "#428b00" },
+    { equals = "idle", dim = true },
+    { equals = "unknown", dim = true },
+  ] }, "workspace", "tab"],
+  ["agent"],
+]
+
+# Actions run against the focused pane. Carry the same bindings in the config of
+# every herdr server you connect to as a machine.
+[[keys.command]]
+key = "prefix+a"
+type = "plugin_action"
+command = "attention-queue.mark-reviewed"
+description = "attention: mark agent reviewed"
+
+[[keys.command]]
+key = "prefix+shift+a"
+type = "plugin_action"
+command = "attention-queue.mark-all-reviewed"
+description = "attention: mark all agents reviewed"
+
+[[keys.command]]
+key = "prefix+m"
+type = "plugin_action"
+command = "attention-queue.mark-unread"
+description = "attention: mark agent done"
