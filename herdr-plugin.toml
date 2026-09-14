@@ -1,0 +1,64 @@
+id = "attention-queue"
+name = "Attention Queue"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Sticky done-until-you-act agent state and an attention-ordered Agents view."
+platforms = ["macos", "linux"]
+
+# Every command runs `python3 -B` so no __pycache__ is written into the plugin
+# checkout (it is usually a git submodule or a managed install directory).
+
+# Reapplies the Agents view and restores sticky state after a server start.
+# Restore emits no agent events, so this also starts a short detached reseed.
+[[startup]]
+command = ["python3", "-B", "attention.py", "startup"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["python3", "-B", "attention.py", "event"]
+
+# A new agent, or an agent exiting (released).
+[[events]]
+on = "pane.agent_detected"
+command = ["python3", "-B", "attention.py", "event"]
+
+[[events]]
+on = "pane.closed"
+command = ["python3", "-B", "attention.py", "event"]
+
+[[actions]]
+id = "mark-reviewed"
+title = "Attention: mark focused agent reviewed"
+description = "Clear the sticky done state of the agent in the focused pane."
+contexts = ["pane"]
+command = ["python3", "-B", "attention.py", "action", "mark-reviewed"]
+
+[[actions]]
+id = "mark-unread"
+title = "Attention: mark focused agent done"
+description = "Put the idle agent in the focused pane back into the done group."
+contexts = ["pane"]
+command = ["python3", "-B", "attention.py", "action", "mark-unread"]
+
+[[actions]]
+id = "mark-all-reviewed"
+title = "Attention: mark all agents reviewed"
+description = "Clear the sticky done state of every agent on this server."
+contexts = ["global"]
+command = ["python3", "-B", "attention.py", "action", "mark-all-reviewed"]
+
+# herdr plugin link/install does not run [[startup]]; run this once afterwards.
+[[actions]]
+id = "reapply"
+title = "Attention: reapply view and reconcile"
+description = "Set the attention-ordered Agents view and refresh every agent's tokens."
+contexts = ["global"]
+command = ["python3", "-B", "attention.py", "action", "reapply"]
+
+# Run before disabling or uninstalling: tokens would otherwise linger on panes.
+[[actions]]
+id = "clear"
+title = "Attention: clear tokens and view"
+description = "Remove this plugin's tokens from every agent and clear its Agents view."
+contexts = ["global"]
+command = ["python3", "-B", "attention.py", "action", "clear"]
