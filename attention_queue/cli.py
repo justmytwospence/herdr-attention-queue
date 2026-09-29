@@ -65,6 +65,13 @@ def main(argv=None) -> int:
             return hooks.on_focus()
         if mode == "follow" and _follow_args(args[1:]):
             return hooks.follow(*_follow_args(args[1:]))
+        if mode == "notifier" and len(args) == 1:
+            if sys.platform != "darwin":
+                print("attention-queue: the notifier runs on macOS only", file=sys.stderr)
+                return 2
+            from . import notifier
+
+            return notifier.run_daemon()
         if mode == "ticker" and len(args) == 1:
             _watchdog(hooks.TICKER_MAX_S + 120)
             return hooks.ticker()
