@@ -21,6 +21,12 @@ EXTRA_TOKEN_NAMES = ("usage",)
 # Seconds between reseed passes after a server start; sums to 150.
 DEFAULT_RESEED_SCHEDULE = (1, 1, 1, 2, 2, 3, 5, 5, 10, 10, 10, 20, 20, 30, 30)
 SEEN_REFRESH_NS = 600 * 10**9
+# The ticker polls while any agent is working or waiting: background detection
+# rules, `bg` tokens and their expiry change without any plugin event.
+TICK_S = 3.0
+TICKER_IDLE_PASSES = 2
+TICKER_MAX_S = 3600
+ACTIVE = ("working", "waiting")
 LOCK_TIMEOUT_S = 10.0
 DEBUG_MAX_BYTES = 256 * 1024
 
@@ -207,10 +213,14 @@ def write_tokens(store: store_mod.Store, st: dict, pending: dict, names=None) ->
             debug(store, "report %s failed: %s" % (pane_id, e))
 
 
-def spawn_usage_refresh() -> None:
-    """Fetch usage in a detached process; it pushes the new text when done."""
+def spawn(mode: str) -> None:
+    """Run `attention.py <mode>` detached.
+
+    DEVNULL for every stream: herdr captures hook output, and a child holding
+    those pipes would keep the hook "running" in the plugin log.
+    """
     subprocess.Popen(
-        [sys.executable, "-B", os.path.join(PLUGIN_ROOT, "attention.py"), "usage-refresh"],
+        [sys.executable, "-B", os.path.join(PLUGIN_ROOT, "attention.py"), mode],
         cwd=PLUGIN_ROOT,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
@@ -218,6 +228,81 @@ def spawn_usage_refresh() -> None:
         start_new_session=True,
         close_fds=True,
     )
+
+
+def spawn_usage_refresh() -> None:
+    """Fetch usage in a detached process; it pushes the new text when done."""
+    spawn("usage-refresh")
+
+
+def tick_s() -> float:
+    return max(0.01, _seconds("HERDR_ATTENTION_QUEUE_TICK_S", TICK_S))
+
+
+def active(st: dict) -> bool:
+    return any(r.get("attn") in ACTIVE for r in st["live"].values())
+
+
+def ticker_lock_path(store: store_mod.Store) -> str:
+    return os.path.join(store.dir, "ticker.lock")
+
+
+def ensure_ticker(store: store_mod.Store, st: dict) -> None:
+    """Start the ticker if an agent is working or waiting and none is running."""
+    if not active(st):
+        return
+    fd = store_mod.try_lock(ticker_lock_path(store))
+    if fd is None:
+        return
+    os.close(fd)
+    spawn("ticker")
+
+
+def explain_background(agents) -> dict:
+    """{terminal_id: matched a background_* rule} for screen-detected working agents."""
+    explained = {}
+    for t in agents:
+        if model.raw_status(t.status) != "working" or t.detection_skipped:
+            continue
+        try:
+            rule = herdr.matched_rule(t.pane_id)
+        except herdr.HerdrError:
+            continue
+        explained[t.terminal_id] = bool(rule and rule.startswith(model.BACKGROUND_RULE_PREFIX))
+    return explained
+
+
+def ticker() -> int:
+    """Poll while agents are working or waiting; exit once none are."""
+    store = open_store()
+    guard = store_mod.try_lock(ticker_lock_path(store))
+    if guard is None:
+        return 0
+    try:
+        quiet = 0
+        deadline = time.monotonic() + TICKER_MAX_S
+        while quiet < TICKER_IDLE_PASSES and time.monotonic() < deadline:
+            try:
+                with store.locked(LOCK_TIMEOUT_S):
+                    st = store.load()
+                    before = store.dumps(st)
+                    agents, completions = read_truth()
+                    explained = explain_background(agents)
+                    pending = reconcile(st, agents, {}, time.time_ns(), completions, explained)
+                    names = decorate(st, agents, pending)
+                    write_tokens(store, st, pending, names)
+                    store.save_if_changed(st, before)
+                    busy = active(st)
+            except store_mod.LockTimeout:
+                busy = True
+            except herdr.Unavailable:
+                # The server is gone; a hook on the next server starts a new ticker.
+                break
+            quiet = 0 if busy else quiet + 1
+            time.sleep(tick_s())
+    finally:
+        os.close(guard)
+    return 0
 
 
 def usage_refresh() -> int:
@@ -265,6 +350,7 @@ def on_event() -> int:
         names = decorate(st, agents, pending)
         write_tokens(store, st, pending, names)
         store.save_if_changed(st, before)
+    ensure_ticker(store, st)
     if pending:
         debug(store, "event pane=%s hint=%s wrote %s" % (pane, hint, sorted(pending)))
     return 0
@@ -273,6 +359,7 @@ def on_event() -> int:
 def on_startup() -> int:
     store = open_store()
     handoff = False
+    st = None
     try:
         with store.locked(LOCK_TIMEOUT_S):
             st = store.load()
@@ -297,21 +384,13 @@ def on_startup() -> int:
     set_view(store)
     if not handoff:
         spawn_reseed()
+    elif st is not None:
+        ensure_ticker(store, st)
     return 0
 
 
 def spawn_reseed() -> None:
-    # DEVNULL for every stream: herdr captures hook output, and a child holding
-    # those pipes would keep the startup command "running" in the plugin log.
-    subprocess.Popen(
-        [sys.executable, "-B", os.path.join(PLUGIN_ROOT, "attention.py"), "reseed"],
-        cwd=PLUGIN_ROOT,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-        close_fds=True,
-    )
+    spawn("reseed")
 
 
 def reseed() -> int:
@@ -348,6 +427,10 @@ def reseed() -> int:
             if finished:
                 break
         set_view(store, attempts=1)
+        try:
+            ensure_ticker(store, store.load())
+        except OSError:
+            pass
     finally:
         os.close(guard)
     return 0
@@ -391,6 +474,7 @@ def action(name: str) -> int:
         names = decorate(st, agents, pending)
         write_tokens(store, st, pending, names)
         store.save_if_changed(st, before)
+    ensure_ticker(store, st)
     if name == "reapply":
         ok = set_view(store)
         print("attention-queue: view %s" % ("applied" if ok else "not applied"))

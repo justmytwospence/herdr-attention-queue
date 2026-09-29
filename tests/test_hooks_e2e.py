@@ -31,8 +31,10 @@ class HookTestCase(unittest.TestCase):
             json.dump(values, f)
 
     def tearDown(self):
-        self.wait_for_reseed()
+        # Close the server first: background processes exit once it is gone.
         self.fake.close()
+        self.wait_for_reseed()
+        self.wait_for_ticker()
         shutil.rmtree(self.state, ignore_errors=True)
         shutil.rmtree(self.config, ignore_errors=True)
 
@@ -49,6 +51,7 @@ class HookTestCase(unittest.TestCase):
                 "HERDR_ATTENTION_QUEUE_SETTLE_S": "0",
                 "HERDR_ATTENTION_QUEUE_RESTORE_S": "0",
                 "HERDR_ATTENTION_QUEUE_RESEED_SCHEDULE": "0.05,0.05",
+                "HERDR_ATTENTION_QUEUE_TICK_S": "0.05",
             }
         )
         env.update(extra)
@@ -97,7 +100,23 @@ class HookTestCase(unittest.TestCase):
         return predicate()
 
     def wait_for_reseed(self):
-        lock = os.path.join(self.state, "sessions", "default", "reseed.lock")
+        return self.wait_for_lock("reseed.lock")
+
+    def wait_for_ticker(self):
+        return self.wait_for_lock("ticker.lock")
+
+    def ticker_running(self):
+        lock = os.path.join(self.state, "sessions", "default", "ticker.lock")
+        if not os.path.exists(lock):
+            return False
+        fd = store.try_lock(lock)
+        if fd is None:
+            return True
+        os.close(fd)
+        return False
+
+    def wait_for_lock(self, name):
+        lock = os.path.join(self.state, "sessions", "default", name)
         if not os.path.exists(lock):
             return
 

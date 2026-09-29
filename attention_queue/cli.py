@@ -8,7 +8,7 @@ import traceback
 from . import herdr, hooks
 from . import store as store_mod
 
-USAGE = "usage: attention.py startup | event | reseed | usage-refresh | action <%s>" % "|".join(
+USAGE = "usage: attention.py startup | event | reseed | ticker | usage-refresh | action <%s>" % "|".join(
     hooks.ACTIONS
 )
 
@@ -40,6 +40,9 @@ def main(argv=None) -> int:
         if mode == "reseed" and len(args) == 1:
             _watchdog(int(sum(hooks.reseed_schedule())) + 60)
             return hooks.reseed()
+        if mode == "ticker" and len(args) == 1:
+            _watchdog(hooks.TICKER_MAX_S + 120)
+            return hooks.ticker()
         if mode == "action" and len(args) == 2 and args[1] in hooks.ACTIONS:
             _watchdog(20)
             return hooks.action(args[1])
