@@ -92,9 +92,48 @@ def list_agents() -> List[Truth]:
                 status=a.get("agent_status") or "unknown",
                 seq=int(a.get("state_change_seq") or 0),
                 tokens={k: v for k, v in tokens.items() if isinstance(v, str)},
+                completion_seq=_int_or_none(a.get("completion_seq")),
+                detection_skipped=bool(a.get("screen_detection_skipped")),
+                workspace_id=a.get("workspace_id"),
+                tab_id=a.get("tab_id"),
             )
         )
     return agents
+
+
+def _int_or_none(value) -> Optional[int]:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def version_tuple(text) -> tuple:
+    parts = []
+    for piece in str(text or "").split("-")[0].split("."):
+        if not piece.isdigit():
+            break
+        parts.append(int(piece))
+    return tuple(parts)
+
+
+def server_version() -> tuple:
+    """(major, minor, patch) of the server, () if it does not say."""
+    return version_tuple(call("ping", {}).get("version"))
+
+
+# herdr 0.9.2 added completion_seq to agent.list. It is omitted when None, so
+# an older server and "no completion" look alike; the version tells them apart.
+COMPLETION_SEQ_VERSION = (0, 9, 2)
+
+
+def reports_completions(version: tuple) -> bool:
+    return version >= COMPLETION_SEQ_VERSION
+
+
+def matched_rule(pane_id: str) -> Optional[str]:
+    """Id of the detection rule that set this agent's state, if screen-detected."""
+    explain = call("agent.explain", {"target": pane_id}).get("explain") or {}
+    rule = explain.get("matched_rule") if isinstance(explain, dict) else None
+    rule_id = rule.get("id") if isinstance(rule, dict) else None
+    return rule_id if isinstance(rule_id, str) else None
 
 
 def report_tokens(

@@ -30,6 +30,9 @@ class FakeHerdr:
         self.calls = []
         self.violations = []
         self.view = None
+        # 0.9.2 added completion_seq; older servers omit it.
+        self.version = "0.9.1"
+        self.rules = {}
         self._seqs = {}
         self._next_seq = 0
         self._lock = threading.Lock()
@@ -41,12 +44,17 @@ class FakeHerdr:
 
     # -- fixture helpers ---------------------------------------------------
 
-    def add_agent(self, pane_id, status="idle", terminal_id=None, session="s1", agent="claude"):
+    def add_agent(
+        self, pane_id, status="idle", terminal_id=None, session="s1", agent="claude", skipped=False
+    ):
         with self._lock:
             self._next_seq += 1
             self.agents[pane_id] = {
                 "pane_id": pane_id,
                 "workspace_id": pane_id.split(":")[0],
+                "tab_id": pane_id.split(":")[0] + ":t1",
+                "screen_detection_skipped": skipped,
+                "completion_seq": None,
                 "terminal_id": terminal_id or "term-" + pane_id.replace(":", "-"),
                 "agent": agent,
                 "agent_status": status,
@@ -69,7 +77,30 @@ class FakeHerdr:
             if old != new:
                 self._next_seq += 1
                 agent["state_change_seq"] = self._next_seq
+                completed = new == "idle" and old in ("working", "blocked")
+                agent["completion_seq"] = self._next_seq if completed else None
             agent["agent_status"] = status
+
+    def set_rule(self, pane_id, rule_id):
+        """The detection rule agent.explain reports as matched for this pane."""
+        with self._lock:
+            self.rules[pane_id] = rule_id
+
+    def set_token(self, pane_id, name, value):
+        """A token another source (e.g. an agent extension) reported."""
+        with self._lock:
+            held = self.agents[pane_id]["tokens"]
+            if value is None:
+                held.pop(name, None)
+            else:
+                held[name] = value
+
+    def _version(self):
+        return tuple(int(x) for x in self.version.split("."))
+
+    def count(self, method):
+        with self._lock:
+            return sum(1 for m, _ in self.calls if m == method)
 
     def remove_agent(self, pane_id):
         with self._lock:
@@ -121,12 +152,30 @@ class FakeHerdr:
                 agents = []
                 for pane_id in self.order:
                     agent = dict(self.agents[pane_id])
+                    if agent["completion_seq"] is None or self._version() < (0, 9, 2):
+                        del agent["completion_seq"]
+                    if not agent["screen_detection_skipped"]:
+                        del agent["screen_detection_skipped"]
                     if agent["tokens"]:
                         agent["tokens"] = dict(agent["tokens"])
                     else:
                         del agent["tokens"]
                     agents.append(agent)
                 return {"type": "agents", "agents": agents}
+            if method == "ping":
+                return {"type": "pong", "version": self.version, "protocol": 22}
+            if method == "agent.explain":
+                pane_id = params.get("target")
+                if pane_id not in self.agents:
+                    raise FakeError("agent_not_found", str(pane_id))
+                rule = self.rules.get(pane_id)
+                return {
+                    "type": "agent_explain",
+                    "explain": {
+                        "agent": self.agents[pane_id]["agent"],
+                        "matched_rule": {"id": rule, "state": "working"} if rule else None,
+                    },
+                }
             if method == "pane.report_metadata":
                 return self._report_metadata(params)
             if method == "agent.view.set":

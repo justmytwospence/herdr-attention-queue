@@ -107,7 +107,31 @@ def _remember(st: dict, rec: dict, now_ns: int, force: bool = False) -> None:
         st["sessions"][key] = model.durable_from(rec, now_ns)
 
 
-def reconcile(st: dict, agents, hints: dict, now_ns: int) -> dict:
+def read_truth():
+    """(agents, completions): herdr's agents and whether it reports completion_seq."""
+    try:
+        version = herdr.server_version()
+    except herdr.HerdrError:
+        version = ()
+    return herdr.list_agents(), herdr.reports_completions(version)
+
+
+def with_background(t: model.Truth, rec, explained: dict) -> model.Truth:
+    """Mark a screen-detected working agent whose matched rule is a background one.
+
+    Only the ticker asks herdr which rule matched (`explained`, by terminal).
+    Other entry points reuse the last answer while herdr's state is unchanged.
+    """
+    if model.raw_status(t.status) != "working" or t.detection_skipped:
+        return t
+    if t.terminal_id in explained:
+        background = bool(explained[t.terminal_id])
+    else:
+        background = rec is not None and rec.get("background_seq") == t.seq
+    return t._replace(background=background)
+
+
+def reconcile(st: dict, agents, hints: dict, now_ns: int, completions: bool = False, explained=None) -> dict:
     """Advance every agent to herdr truth; return {pane_id: tokens} to write."""
     restoring = now_ns < int(st["boot"].get("restore_until_ns") or 0)
     live = st["live"]
@@ -116,6 +140,7 @@ def reconcile(st: dict, agents, hints: dict, now_ns: int) -> dict:
     for t in agents:
         present.add(t.terminal_id)
         durable = st["sessions"].get(t.session) if t.session else None
+        t = with_background(t, live.get(t.terminal_id), explained or {})
         rec = model.step(
             live.get(t.terminal_id),
             t,
@@ -124,7 +149,9 @@ def reconcile(st: dict, agents, hints: dict, now_ns: int) -> dict:
             restoring,
             durable,
             settle_ns(),
+            completions,
         )
+        rec["background_seq"] = t.seq if t.background else None
         live[t.terminal_id] = rec
         _remember(st, rec, now_ns)
         want = model.tokens_for(rec)
@@ -205,8 +232,8 @@ def usage_refresh() -> int:
         with store.locked(LOCK_TIMEOUT_S):
             st = store.load()
             before = store.dumps(st)
-            agents = herdr.list_agents()
-            pending = reconcile(st, agents, {}, time.time_ns())
+            agents, completions = read_truth()
+            pending = reconcile(st, agents, {}, time.time_ns(), completions)
             names = decorate(st, agents, pending)
             write_tokens(store, st, pending, names)
             store.save_if_changed(st, before)
@@ -233,8 +260,8 @@ def on_event() -> int:
         st = store.load()
         before = store.dumps(st)
         now = time.time_ns()
-        agents = herdr.list_agents()
-        pending = reconcile(st, agents, hints, now)
+        agents, completions = read_truth()
+        pending = reconcile(st, agents, hints, now, completions)
         names = decorate(st, agents, pending)
         write_tokens(store, st, pending, names)
         store.save_if_changed(st, before)
@@ -251,7 +278,7 @@ def on_startup() -> int:
             st = store.load()
             before = store.dumps(st)
             now = time.time_ns()
-            agents = herdr.list_agents()
+            agents, completions = read_truth()
             # A live handoff keeps terminals; a cold start relaunches agents
             # after this hook, with new terminal ids and no events.
             handoff = bool(set(st["live"]) & {t.terminal_id for t in agents})
@@ -261,7 +288,7 @@ def on_startup() -> int:
                 )
                 st["live"] = {}
                 st["boot"] = {"started_ns": now, "restore_until_ns": now + restore_ns()}
-            pending = reconcile(st, agents, {}, now)
+            pending = reconcile(st, agents, {}, now, completions)
             names = decorate(st, agents, pending)
             write_tokens(store, st, pending, names)
             store.save_if_changed(st, before)
@@ -303,8 +330,8 @@ def reseed() -> int:
                     st = store.load()
                     before = store.dumps(st)
                     now = time.time_ns()
-                    agents = herdr.list_agents()
-                    pending = reconcile(st, agents, {}, now)
+                    agents, completions = read_truth()
+                    pending = reconcile(st, agents, {}, now, completions)
                     names = decorate(st, agents, pending)
                     write_tokens(store, st, pending, names)
                     expect = set(st.get("expect") or [])
@@ -334,8 +361,8 @@ def action(name: str) -> int:
         st = store.load()
         before = store.dumps(st)
         now = time.time_ns()
-        agents = herdr.list_agents()
-        pending = reconcile(st, agents, {}, now)
+        agents, completions = read_truth()
+        pending = reconcile(st, agents, {}, now, completions)
         by_pane = {t.pane_id: t for t in agents}
         targets = []
         if name in ("mark-reviewed", "mark-unread"):
@@ -347,12 +374,12 @@ def action(name: str) -> int:
         elif name == "mark-all-reviewed":
             targets = list(agents)
         for t in targets:
-            raw = model.raw_status(t.status)
             rec = st["live"][t.terminal_id]
+            t = with_background(t, rec, {})
             if name == "mark-unread":
-                rec = model.apply_unread(rec, raw, now)
+                rec = model.apply_unread(rec, t, now)
             else:
-                rec = model.apply_ack(rec, raw, now)
+                rec = model.apply_ack(rec, t, now)
             st["live"][t.terminal_id] = rec
             _remember(st, rec, now, force=True)
             want = model.tokens_for(rec)
