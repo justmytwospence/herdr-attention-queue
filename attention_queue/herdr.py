@@ -97,12 +97,24 @@ def list_agents() -> List[Truth]:
     return agents
 
 
-def report_tokens(pane_id: str, tokens: Dict[str, Optional[str]], seq: int) -> None:
-    """Patch this plugin's tokens on a pane. A None value clears that token."""
-    call(
-        "pane.report_metadata",
-        {"pane_id": pane_id, "source": source(), "tokens": tokens, "seq": seq},
-    )
+def report_tokens(
+    pane_id: str,
+    tokens: Dict[str, Optional[str]],
+    seq: int,
+    label: Optional[str] = None,
+    clear_label: bool = False,
+) -> None:
+    """Patch this plugin's tokens on a pane. A None value clears that token.
+
+    `label` names a Claude session. Presentation fields are scoped to the
+    reporting source, so every report for a named pane carries them again.
+    """
+    params = {"pane_id": pane_id, "source": source(), "tokens": tokens, "seq": seq}
+    if label:
+        params.update({"agent": "claude", "title": label, "display_agent": "Claude: " + label})
+    elif clear_label:
+        params.update({"clear_title": True, "clear_display_agent": True})
+    call("pane.report_metadata", params)
 
 
 def set_view() -> dict:

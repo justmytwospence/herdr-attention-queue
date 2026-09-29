@@ -1,8 +1,8 @@
 id = "attention-queue"
 name = "Attention Queue"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.9.0"
-description = "Sticky done-until-you-act agent state and an attention-ordered Agents view."
+description = "Sticky done-until-you-act agent state, an attention-ordered Agents view, and Claude usage on every agent row."
 platforms = ["macos", "linux"]
 
 # Every command runs `python3 -B` so no __pycache__ is written into the plugin

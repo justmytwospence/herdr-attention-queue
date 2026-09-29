@@ -11,10 +11,12 @@ import subprocess
 import sys
 import time
 
-from . import herdr, model
+from . import config, herdr, labels, model, usage
 from . import store as store_mod
 
 ACTIONS = ("mark-reviewed", "mark-unread", "mark-all-reviewed", "reapply", "clear")
+# Tokens this plugin owns besides the attention ones.
+EXTRA_TOKEN_NAMES = ("usage",)
 
 # Seconds between reseed passes after a server start; sums to 150.
 DEFAULT_RESEED_SCHEDULE = (1, 1, 1, 2, 2, 3, 5, 5, 10, 10, 10, 20, 20, 30, 30)
@@ -139,16 +141,76 @@ def reconcile(st: dict, agents, hints: dict, now_ns: int) -> dict:
     return pending
 
 
-def write_tokens(store: store_mod.Store, st: dict, pending: dict) -> None:
+def decorate(st: dict, agents, pending: dict) -> dict:
+    """Add the usage token and Claude session names to what reconcile wants written.
+
+    Returns {pane_id: name} for every named Claude pane; a pane whose name is new
+    gets an entry in `pending` (possibly with no tokens) so the name is reported.
+    """
+    text = usage.current(store_mod.state_root(), spawn_usage_refresh) if config.enabled("usage") else None
+    names = {}
+    for t in agents:
+        want = None
+        if text and t.tokens.get("usage") != text:
+            want = dict(pending.get(t.pane_id) or {})
+            want["usage"] = text
+        if config.enabled("claude_names") and t.agent == "claude":
+            name = labels.claude_name(t.session)
+            rec = st["live"].get(t.terminal_id)
+            if name:
+                names[t.pane_id] = name
+                if rec is not None and rec.get("label") != name:
+                    rec["label"] = name
+                    if want is None:
+                        want = dict(pending.get(t.pane_id) or {})
+        if want is not None:
+            pending[t.pane_id] = want
+    return names
+
+
+def write_tokens(store: store_mod.Store, st: dict, pending: dict, names=None) -> None:
     for pane_id, tokens in pending.items():
         seq = max(time.time_ns(), int(st.get("report_seq") or 0) + 1)
         st["report_seq"] = seq
         try:
-            herdr.report_tokens(pane_id, tokens, seq)
+            herdr.report_tokens(pane_id, tokens, seq, (names or {}).get(pane_id))
         except herdr.HerdrError as e:
             # Usually the pane closed between agent.list and this write; the
             # next reconcile sees the new truth.
             debug(store, "report %s failed: %s" % (pane_id, e))
+
+
+def spawn_usage_refresh() -> None:
+    """Fetch usage in a detached process; it pushes the new text when done."""
+    subprocess.Popen(
+        [sys.executable, "-B", os.path.join(PLUGIN_ROOT, "attention.py"), "usage-refresh"],
+        cwd=PLUGIN_ROOT,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+    )
+
+
+def usage_refresh() -> int:
+    root = store_mod.state_root()
+    try:
+        fetched = usage.refresh(root)
+    finally:
+        usage.release_refresh(root)
+    if fetched:
+        # Push the new text to every agent row now rather than on the next event.
+        store = open_store()
+        with store.locked(LOCK_TIMEOUT_S):
+            st = store.load()
+            before = store.dumps(st)
+            agents = herdr.list_agents()
+            pending = reconcile(st, agents, {}, time.time_ns())
+            names = decorate(st, agents, pending)
+            write_tokens(store, st, pending, names)
+            store.save_if_changed(st, before)
+    return 0
 
 
 def set_view(store: store_mod.Store, attempts: int = 3) -> bool:
@@ -171,8 +233,10 @@ def on_event() -> int:
         st = store.load()
         before = store.dumps(st)
         now = time.time_ns()
-        pending = reconcile(st, herdr.list_agents(), hints, now)
-        write_tokens(store, st, pending)
+        agents = herdr.list_agents()
+        pending = reconcile(st, agents, hints, now)
+        names = decorate(st, agents, pending)
+        write_tokens(store, st, pending, names)
         store.save_if_changed(st, before)
     if pending:
         debug(store, "event pane=%s hint=%s wrote %s" % (pane, hint, sorted(pending)))
@@ -198,7 +262,8 @@ def on_startup() -> int:
                 st["live"] = {}
                 st["boot"] = {"started_ns": now, "restore_until_ns": now + restore_ns()}
             pending = reconcile(st, agents, {}, now)
-            write_tokens(store, st, pending)
+            names = decorate(st, agents, pending)
+            write_tokens(store, st, pending, names)
             store.save_if_changed(st, before)
     except store_mod.LockTimeout:
         pass
@@ -240,7 +305,8 @@ def reseed() -> int:
                     now = time.time_ns()
                     agents = herdr.list_agents()
                     pending = reconcile(st, agents, {}, now)
-                    write_tokens(store, st, pending)
+                    names = decorate(st, agents, pending)
+                    write_tokens(store, st, pending, names)
                     expect = set(st.get("expect") or [])
                     if expect:
                         present = {t.session for t in agents if t.session}
@@ -295,7 +361,8 @@ def action(name: str) -> int:
             else:
                 pending.pop(t.pane_id, None)
             print("attention-queue: %s -> %s" % (t.pane_id, rec["attn"]))
-        write_tokens(store, st, pending)
+        names = decorate(st, agents, pending)
+        write_tokens(store, st, pending, names)
         store.save_if_changed(st, before)
     if name == "reapply":
         ok = set_view(store)
@@ -308,16 +375,18 @@ def clear(store: store_mod.Store) -> int:
     with store.locked(LOCK_TIMEOUT_S):
         st = store.load()
         before = store.dumps(st)
-        nulls = {k: None for k in model.TOKEN_NAMES}
-        write_tokens(
-            store,
-            st,
-            {
-                t.pane_id: nulls
-                for t in herdr.list_agents()
-                if any(k in t.tokens for k in model.TOKEN_NAMES)
-            },
-        )
+        owned = model.TOKEN_NAMES + EXTRA_TOKEN_NAMES
+        nulls = {k: None for k in owned}
+        for t in herdr.list_agents():
+            named = t.agent == "claude"
+            if not named and not any(k in t.tokens for k in owned):
+                continue
+            seq = max(time.time_ns(), int(st.get("report_seq") or 0) + 1)
+            st["report_seq"] = seq
+            try:
+                herdr.report_tokens(t.pane_id, nulls, seq, clear_label=named)
+            except herdr.HerdrError as e:
+                debug(store, "clear %s failed: %s" % (t.pane_id, e))
         # Durable per-conversation state is kept; only live rendering is reset.
         st["live"] = {}
         store.save_if_changed(st, before)

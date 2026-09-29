@@ -21,11 +21,20 @@ class HookTestCase(unittest.TestCase):
     def setUp(self):
         self.fake = FakeHerdr()
         self.state = tempfile.mkdtemp(prefix="aq-state-", dir="/tmp")
+        # Usage and names read the network, the Keychain, and ~/.claude: off
+        # unless a test turns them on with fixtures.
+        self.config = tempfile.mkdtemp(prefix="aq-config-", dir="/tmp")
+        self.write_config(usage=False, claude_names=False)
+
+    def write_config(self, **values):
+        with open(os.path.join(self.config, "config.json"), "w") as f:
+            json.dump(values, f)
 
     def tearDown(self):
         self.wait_for_reseed()
         self.fake.close()
         shutil.rmtree(self.state, ignore_errors=True)
+        shutil.rmtree(self.config, ignore_errors=True)
 
     def env(self, **extra):
         env = {k: v for k, v in os.environ.items() if not k.startswith("HERDR_")}
@@ -33,6 +42,7 @@ class HookTestCase(unittest.TestCase):
             {
                 "HERDR_SOCKET_PATH": self.fake.path,
                 "HERDR_PLUGIN_STATE_DIR": self.state,
+                "HERDR_PLUGIN_CONFIG_DIR": self.config,
                 "HERDR_PLUGIN_ID": "attention-queue",
                 "HERDR_PLUGIN_ROOT": ROOT,
                 "PYTHONDONTWRITEBYTECODE": "1",
@@ -272,3 +282,46 @@ class LifecycleTest(HookTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UsageAndNamesTest(HookTestCase):
+    def test_usage_reaches_every_agent_row_and_claude_rows_get_session_names(self):
+        claude = tempfile.mkdtemp(prefix="aq-claude-", dir="/tmp")
+        self.addCleanup(shutil.rmtree, claude, True)
+        os.makedirs(os.path.join(claude, "jobs", "abcdef12"))
+        with open(os.path.join(claude, "jobs", "abcdef12", "state.json"), "w") as f:
+            json.dump({"name": "cache layer"}, f)
+        with open(os.path.join(self.state, "usage.json"), "w") as f:
+            json.dump({"five_hour": {"utilization": 40}}, f)
+        self.write_config(usage=True, claude_names=True)
+        self.fake.add_agent("w1:p1", "working", session="abcdef12-0000-4000-8000-000000000000")
+        self.fake.add_agent("w1:p2", "idle", session="/tmp/pi.jsonl", agent="pi")
+        self.run_hook("event", event=self.status_event("w1:p1"), CLAUDE_CONFIG_DIR=claude)
+        self.assertEqual(self.fake.tokens("w1:p1").get("usage"), "\U000F0954 40%")
+        self.assertEqual(self.fake.tokens("w1:p2").get("usage"), "\U000F0954 40%")
+        self.assertEqual(self.fake.agents["w1:p1"].get("title"), "cache layer")
+        self.assertEqual(self.fake.agents["w1:p1"].get("display_agent"), "Claude: cache layer")
+        self.assertNotIn("title", self.fake.agents["w1:p2"])
+        # Unchanged text and names are not reported again.
+        reports = len([c for c in self.fake.calls if c[0] == "pane.report_metadata"])
+        self.run_hook("event", event=self.status_event("w1:p2"), CLAUDE_CONFIG_DIR=claude)
+        self.assertEqual(len([c for c in self.fake.calls if c[0] == "pane.report_metadata"]), reports)
+        # clear removes the usage token and the names.
+        self.run_hook("action", "clear", CLAUDE_CONFIG_DIR=claude)
+        self.assertNotIn("usage", self.fake.tokens("w1:p1"))
+        self.assertNotIn("title", self.fake.agents["w1:p1"])
+        self.assertEqual(self.fake.violations, [])
+
+    def test_a_stale_cache_refreshes_in_the_background_and_pushes_the_new_text(self):
+        reply = os.path.join(self.state, "reply.json")
+        with open(reply, "w") as f:
+            json.dump({"seven_day": {"utilization": 77}}, f)
+        self.write_config(usage=True, claude_names=False)
+        self.fake.add_agent("w1:p1", "idle")
+        extra = {"CLAUDE_CODE_OAUTH_TOKEN": "tok", "HERDR_ATTENTION_QUEUE_USAGE_URL": "file://" + reply}
+        self.run_hook("event", event=self.status_event("w1:p1"), **extra)
+        deadline = time.time() + 10
+        while time.time() < deadline and self.fake.tokens("w1:p1").get("usage") != "\U000F00ED 77%":
+            time.sleep(0.05)
+        self.assertEqual(self.fake.tokens("w1:p1").get("usage"), "\U000F00ED 77%")
+        self.assertFalse(os.path.exists(os.path.join(self.state, "usage.lock")))

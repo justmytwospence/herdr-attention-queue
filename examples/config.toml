@@ -20,7 +20,7 @@ rows = [
     { equals = "idle", dim = true },
     { equals = "unknown", dim = true },
   ] }, "workspace", "tab"],
-  ["agent"],
+  ["agent", { token = "$usage", dim = true }],
 ]
 
 # Actions run against the focused pane. Carry the same bindings in the config of

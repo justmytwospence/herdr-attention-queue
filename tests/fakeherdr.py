@@ -161,6 +161,14 @@ class FakeHerdr:
                 self.violations.append("non-increasing seq %s <= %s for %s" % (seq, last, key))
                 return {"type": "ok"}
             self._seqs[key] = seq
+        agent = self.agents[pane_id]
+        if params.get("title") and params.get("agent") in (None, agent["agent"]):
+            agent["title"] = params["title"]
+            agent["display_agent"] = params.get("display_agent")
+        if params.get("clear_title"):
+            agent.pop("title", None)
+        if params.get("clear_display_agent"):
+            agent.pop("display_agent", None)
         held = self.agents[pane_id]["tokens"]
         for name, value in tokens.items():
             if value is None or value == "":

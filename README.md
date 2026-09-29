@@ -58,6 +58,33 @@ Tokens reported on each agent pane (source `plugin:attention-queue`):
 | `attn` | `blocked`, `done`, `working`, `idle`, `unknown` |
 | `attn_rank` | `0` to `4`, in that order |
 | `attn_ts` | wall-clock milliseconds when the agent entered its current state, zero-padded |
+| `usage` | Claude plan usage, e.g. `󰥔 38% 7h55m 󰃭 15% 6d 󰁨 8% 󰄔 $154.21/$150 off` (see below) |
+
+## Claude usage and session names
+
+Two extras, both on by default:
+
+- **`usage`**: the Claude plan gauges on every agent row, whichever agent it is:
+  the 5-hour block and 7-day window with time to reset, each model's weekly cap,
+  and extra-usage spend (`off` when extra usage is disabled). The data comes from
+  the OAuth usage endpoint Claude Code's `/status` reads, with the token Claude
+  Code stores (the macOS Keychain item `Claude Code-credentials`, else
+  `~/.claude/.credentials.json`, or `CLAUDE_CODE_OAUTH_TOKEN`). The reply is
+  cached in the plugin state directory for 5 minutes; hooks never wait on the
+  network, and a stale cache is refreshed by one detached process that then
+  updates every row. Without a Claude login there is no token and no gauge.
+  Render it with `{ token = "$usage", dim = true }`; the icons are Nerd Font
+  glyphs.
+- **Claude session names**: a Claude pane's title and agent label become the
+  name Claude Code gave the session (`Claude: wireguard snowflake routing`),
+  read from `~/.claude/jobs/<session>/state.json`.
+
+Turn either off in `config.json` in the plugin config directory
+(`herdr plugin config-dir attention-queue`):
+
+```json
+{"usage": false, "claude_names": false}
+```
 
 ## Actions
 
@@ -106,6 +133,8 @@ machines' clocks NTP-synced.
   restarts.
 - Tokens stay on panes if the plugin is removed without `clear`, until the panes
   close or the server restarts. The view clears itself.
+- The usage countdown advances when agents change state; with every agent idle
+  it can lag until the next event.
 
 ## Development
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- `usage` token: Claude plan usage (5-hour block, 7-day window, per-model weekly
+  caps, extra-usage spend) on every agent row, from the OAuth usage endpoint with
+  Claude Code's stored token. Cached for 5 minutes and refreshed by one detached
+  process, so hooks never wait on the network.
+- Claude panes take the session name Claude Code assigned as their title and
+  agent label.
+- Both are on by default and can be turned off in `config.json` in the plugin
+  config directory. `clear` also removes them.
+
 ## 0.1.0
 
 - Sticky done: an agent that finishes a turn stays done until it works again or
