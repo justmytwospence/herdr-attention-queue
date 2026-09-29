@@ -8,9 +8,29 @@ import traceback
 from . import herdr, hooks
 from . import store as store_mod
 
-USAGE = "usage: attention.py startup | event | reseed | ticker | usage-refresh | action <%s>" % "|".join(
-    hooks.ACTIONS
+USAGE = (
+    "usage: attention.py startup | event | focus | reseed | ticker | usage-refresh | action <%s>\n"
+    "       attention.py follow --session NAME [--since-ms N]\n"
+    "       attention.py notifier" % "|".join(hooks.ACTIONS)
 )
+
+
+def _follow_args(args):
+    """(session, since_ms) from `--session NAME [--since-ms N]`, or None."""
+    session, since = None, 0
+    rest = list(args)
+    while rest:
+        flag = rest.pop(0)
+        if not rest:
+            return None
+        value = rest.pop(0)
+        if flag == "--session":
+            session = value
+        elif flag == "--since-ms" and value.isdigit():
+            since = int(value)
+        else:
+            return None
+    return (session, since) if session else None
 
 
 def _watchdog(seconds: int) -> None:
@@ -40,6 +60,11 @@ def main(argv=None) -> int:
         if mode == "reseed" and len(args) == 1:
             _watchdog(int(sum(hooks.reseed_schedule())) + 60)
             return hooks.reseed()
+        if mode == "focus" and len(args) == 1:
+            _watchdog(15)
+            return hooks.on_focus()
+        if mode == "follow" and _follow_args(args[1:]):
+            return hooks.follow(*_follow_args(args[1:]))
         if mode == "ticker" and len(args) == 1:
             _watchdog(hooks.TICKER_MAX_S + 120)
             return hooks.ticker()

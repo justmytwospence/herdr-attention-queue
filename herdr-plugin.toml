@@ -26,6 +26,11 @@ command = ["python3", "-B", "attention.py", "event"]
 on = "pane.closed"
 command = ["python3", "-B", "attention.py", "event"]
 
+# Logs the focus for the notifier; focusing never changes attention state.
+[[events]]
+on = "pane.focused"
+command = ["python3", "-B", "attention.py", "focus"]
+
 [[actions]]
 id = "mark-reviewed"
 title = "Attention: mark focused agent reviewed"

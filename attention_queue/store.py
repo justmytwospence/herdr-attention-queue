@@ -27,6 +27,10 @@ class LockTimeout(Exception):
     pass
 
 
+def valid_session_name(name: str) -> bool:
+    return name not in (".", "..") and bool(_SESSION_RE.fullmatch(name or ""))
+
+
 def session_name(sock_path: str) -> str:
     """`homelab` for .../sessions/homelab/herdr.sock, else `default`."""
     directory = os.path.dirname(sock_path)

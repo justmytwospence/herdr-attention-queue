@@ -162,6 +162,16 @@ class FakeHerdr:
                         del agent["tokens"]
                     agents.append(agent)
                 return {"type": "agents", "agents": agents}
+            if method == "workspace.list":
+                ids = []
+                for pane_id in self.order:
+                    wid = self.agents[pane_id]["workspace_id"]
+                    if wid not in ids:
+                        ids.append(wid)
+                return {
+                    "type": "workspace_list",
+                    "workspaces": [{"workspace_id": w, "label": "ws " + w} for w in ids],
+                }
             if method == "ping":
                 return {"type": "pong", "version": self.version, "protocol": 22}
             if method == "agent.explain":

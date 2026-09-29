@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 
-from . import config, herdr, labels, model, usage
+from . import config, herdr, labels, model, translog, usage
 from . import store as store_mod
 
 ACTIONS = ("mark-reviewed", "mark-unread", "mark-all-reviewed", "reapply", "clear")
@@ -137,9 +137,24 @@ def with_background(t: model.Truth, rec, explained: dict) -> model.Truth:
     return t._replace(background=background)
 
 
-def reconcile(st: dict, agents, hints: dict, now_ns: int, completions: bool = False, explained=None) -> dict:
-    """Advance every agent to herdr truth; return {pane_id: tokens} to write."""
-    restoring = now_ns < int(st["boot"].get("restore_until_ns") or 0)
+def restoring_at(st: dict, now_ns: int) -> bool:
+    return now_ns < int(st["boot"].get("restore_until_ns") or 0)
+
+
+def reconcile(
+    st: dict,
+    agents,
+    hints: dict,
+    now_ns: int,
+    completions: bool = False,
+    explained=None,
+    changes=None,
+) -> dict:
+    """Advance every agent to herdr truth; return {pane_id: tokens} to write.
+
+    Appends (truth, previous attn, record) to `changes` for every attn change.
+    """
+    restoring = restoring_at(st, now_ns)
     live = st["live"]
     pending = {}
     present = set()
@@ -158,6 +173,9 @@ def reconcile(st: dict, agents, hints: dict, now_ns: int, completions: bool = Fa
             completions,
         )
         rec["background_seq"] = t.seq if t.background else None
+        prev = (live.get(t.terminal_id) or {}).get("attn")
+        if changes is not None and rec["attn"] != prev:
+            changes.append((t, prev, rec))
         live[t.terminal_id] = rec
         _remember(st, rec, now_ns)
         want = model.tokens_for(rec)
@@ -199,6 +217,41 @@ def decorate(st: dict, agents, pending: dict) -> dict:
         if want is not None:
             pending[t.pane_id] = want
     return names
+
+
+def log_changes(store: store_mod.Store, st: dict, changes, now_ns: int) -> None:
+    """Append attn changes to the transition log (under the session lock)."""
+    if not changes:
+        return
+    labels_by_id = {}
+    if any(rec["attn"] in ("blocked", "done") for _, _, rec in changes):
+        try:
+            for w in herdr.call("workspace.list", {}).get("workspaces") or []:
+                if isinstance(w, dict) and isinstance(w.get("label"), str):
+                    labels_by_id[w.get("workspace_id")] = w["label"]
+        except (herdr.Unavailable, herdr.HerdrError) as e:
+            debug(store, "workspace.list failed: %s" % e)
+    restoring = restoring_at(st, now_ns)
+    lines = []
+    for t, prev, rec in changes:
+        workspace = labels_by_id.get(t.workspace_id) if rec["attn"] in ("blocked", "done") else None
+        lines.append(
+            translog.attn_line(
+                t, rec["attn"], prev, restoring, workspace, rec.get("label"), now_ns // 10**6
+            )
+        )
+    try:
+        translog.append(store.dir, lines)
+    except OSError as e:
+        debug(store, "transition log write failed: %s" % e)
+
+
+def publish(store: store_mod.Store, st: dict, agents, pending: dict, changes, now_ns: int) -> None:
+    """Write tokens and names, and log the attention changes."""
+    st.pop("cleared", None)
+    names = decorate(st, agents, pending)
+    write_tokens(store, st, pending, names)
+    log_changes(store, st, changes, now_ns)
 
 
 def write_tokens(store: store_mod.Store, st: dict, pending: dict, names=None) -> None:
@@ -285,12 +338,15 @@ def ticker() -> int:
             try:
                 with store.locked(LOCK_TIMEOUT_S):
                     st = store.load()
+                    if st.get("cleared"):
+                        # `clear` ran: do not put the tokens back.
+                        break
                     before = store.dumps(st)
                     agents, completions = read_truth()
                     explained = explain_background(agents)
-                    pending = reconcile(st, agents, {}, time.time_ns(), completions, explained)
-                    names = decorate(st, agents, pending)
-                    write_tokens(store, st, pending, names)
+                    now, changes = time.time_ns(), []
+                    pending = reconcile(st, agents, {}, now, completions, explained, changes)
+                    publish(store, st, agents, pending, changes, now)
                     store.save_if_changed(st, before)
                     busy = active(st)
             except store_mod.LockTimeout:
@@ -318,9 +374,9 @@ def usage_refresh() -> int:
             st = store.load()
             before = store.dumps(st)
             agents, completions = read_truth()
-            pending = reconcile(st, agents, {}, time.time_ns(), completions)
-            names = decorate(st, agents, pending)
-            write_tokens(store, st, pending, names)
+            now, changes = time.time_ns(), []
+            pending = reconcile(st, agents, {}, now, completions, None, changes)
+            publish(store, st, agents, pending, changes, now)
             store.save_if_changed(st, before)
     return 0
 
@@ -346,14 +402,43 @@ def on_event() -> int:
         before = store.dumps(st)
         now = time.time_ns()
         agents, completions = read_truth()
-        pending = reconcile(st, agents, hints, now, completions)
-        names = decorate(st, agents, pending)
-        write_tokens(store, st, pending, names)
+        changes = []
+        pending = reconcile(st, agents, hints, now, completions, None, changes)
+        publish(store, st, agents, pending, changes, now)
         store.save_if_changed(st, before)
     ensure_ticker(store, st)
     if pending:
         debug(store, "event pane=%s hint=%s wrote %s" % (pane, hint, sorted(pending)))
     return 0
+
+
+def on_focus() -> int:
+    """Log that a pane got focus, so the notifier can drop its notification."""
+    pane, _ = parse_event(os.environ.get("HERDR_PLUGIN_EVENT_JSON"))
+    if not pane:
+        return 0
+    store = open_store()
+    with store.locked(LOCK_TIMEOUT_S):
+        translog.append(store.dir, [translog.focus_line(pane, time.time_ns() // 10**6)])
+    return 0
+
+
+def follow(session: str, since_ms: int) -> int:
+    """Print the session's transition log from since_ms on, then follow it."""
+    if not store_mod.valid_session_name(session):
+        print("attention-queue: bad session name %r" % session, file=sys.stderr)
+        return 2
+    directory = os.path.join(store_mod.state_root(), "sessions", session)
+    parent = os.getppid()
+    try:
+        return translog.follow(directory, since_ms, stop=lambda: os.getppid() != parent)
+    except BrokenPipeError:
+        # The reader (usually an ssh session) went away.
+        try:
+            sys.stdout = open(os.devnull, "w")
+        except OSError:
+            pass
+        return 0
 
 
 def on_startup() -> int:
@@ -375,9 +460,9 @@ def on_startup() -> int:
                 )
                 st["live"] = {}
                 st["boot"] = {"started_ns": now, "restore_until_ns": now + restore_ns()}
-            pending = reconcile(st, agents, {}, now, completions)
-            names = decorate(st, agents, pending)
-            write_tokens(store, st, pending, names)
+            changes = []
+            pending = reconcile(st, agents, {}, now, completions, None, changes)
+            publish(store, st, agents, pending, changes, now)
             store.save_if_changed(st, before)
     except store_mod.LockTimeout:
         pass
@@ -410,9 +495,9 @@ def reseed() -> int:
                     before = store.dumps(st)
                     now = time.time_ns()
                     agents, completions = read_truth()
-                    pending = reconcile(st, agents, {}, now, completions)
-                    names = decorate(st, agents, pending)
-                    write_tokens(store, st, pending, names)
+                    changes = []
+                    pending = reconcile(st, agents, {}, now, completions, None, changes)
+                    publish(store, st, agents, pending, changes, now)
                     expect = set(st.get("expect") or [])
                     if expect:
                         present = {t.session for t in agents if t.session}
@@ -445,7 +530,8 @@ def action(name: str) -> int:
         before = store.dumps(st)
         now = time.time_ns()
         agents, completions = read_truth()
-        pending = reconcile(st, agents, {}, now, completions)
+        changes = []
+        pending = reconcile(st, agents, {}, now, completions, None, changes)
         by_pane = {t.pane_id: t for t in agents}
         targets = []
         if name in ("mark-reviewed", "mark-unread"):
@@ -459,10 +545,13 @@ def action(name: str) -> int:
         for t in targets:
             rec = st["live"][t.terminal_id]
             t = with_background(t, rec, {})
+            prev = rec.get("attn")
             if name == "mark-unread":
                 rec = model.apply_unread(rec, t, now)
             else:
                 rec = model.apply_ack(rec, t, now)
+            if rec["attn"] != prev:
+                changes.append((t, prev, rec))
             st["live"][t.terminal_id] = rec
             _remember(st, rec, now, force=True)
             want = model.tokens_for(rec)
@@ -471,8 +560,7 @@ def action(name: str) -> int:
             else:
                 pending.pop(t.pane_id, None)
             print("attention-queue: %s -> %s" % (t.pane_id, rec["attn"]))
-        names = decorate(st, agents, pending)
-        write_tokens(store, st, pending, names)
+        publish(store, st, agents, pending, changes, now)
         store.save_if_changed(st, before)
     ensure_ticker(store, st)
     if name == "reapply":
@@ -500,6 +588,7 @@ def clear(store: store_mod.Store) -> int:
                 debug(store, "clear %s failed: %s" % (t.pane_id, e))
         # Durable per-conversation state is kept; only live rendering is reset.
         st["live"] = {}
+        st["cleared"] = True
         store.save_if_changed(st, before)
     try:
         herdr.clear_view()
