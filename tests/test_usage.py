@@ -67,6 +67,25 @@ class CacheTest(unittest.TestCase):
         usage.current(self.root, lambda: started.append(2))
         self.assertEqual(started, [1, 2])
 
+    def test_a_failed_fetch_backs_off_for_a_full_ttl(self):
+        env = {"CLAUDE_CODE_OAUTH_TOKEN": "tok", "HERDR_ATTENTION_QUEUE_USAGE_URL": "file:///nonexistent/usage.json"}
+        saved = {k: os.environ.get(k) for k in env}
+        os.environ.update(env)
+        try:
+            self.assertFalse(usage.refresh(self.root))
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        self.assertIsNone(usage.current(self.root, lambda: self.fail("retried during backoff")))
+        old = time.time() - usage.TTL_S - 1
+        os.utime(usage.backoff_path(self.root), (old, old))
+        started = []
+        usage.current(self.root, lambda: started.append(1))
+        self.assertEqual(started, [1])
+
     def test_a_fresh_cache_starts_nothing(self):
         with open(usage.cache_path(self.root), "w") as f:
             json.dump({"seven_day": {"utilization": 1}}, f)

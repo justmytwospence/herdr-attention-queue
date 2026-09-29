@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- A failed usage fetch (no token, HTTP 429, offline) waits five minutes before
+  the next try instead of retrying on every hook.
+
 ## 0.2.0
 
 - `usage` token: Claude plan usage (5-hour block, 7-day window, per-model weekly

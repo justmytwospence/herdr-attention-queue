@@ -100,20 +100,41 @@ def fetch(token: str) -> dict:
     return data
 
 
+def backoff_path(state_root: str) -> str:
+    return os.path.join(state_root, "usage.failed")
+
+
+def _note_failure(state_root: str) -> None:
+    """A failed fetch (no token, rate limited, offline) waits a full TTL before retrying."""
+    try:
+        with open(backoff_path(state_root), "w"):
+            pass
+    except OSError:
+        pass
+
+
 def refresh(state_root: str) -> bool:
     """Fetch and cache the usage reply. False when there is no token or it failed."""
     token = access_token()
     if not token:
+        _note_failure(state_root)
         return False
     try:
         data = fetch(token)
     except (OSError, ValueError):
+        # Includes HTTP 429: the endpoint rate limits, and retrying on every
+        # hook would keep it limited.
+        _note_failure(state_root)
         return False
     fd, tmp = tempfile.mkstemp(dir=state_root, prefix=".usage-")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f)
         os.replace(tmp, cache_path(state_root))
+        try:
+            os.unlink(backoff_path(state_root))
+        except OSError:
+            pass
     except OSError:
         try:
             os.unlink(tmp)
@@ -205,6 +226,13 @@ def render(data: Optional[dict], now: Optional[float] = None) -> Optional[str]:
 def current(state_root: str, start_refresh) -> Optional[str]:
     """The text to show now; starts a detached refresh when the cache is stale."""
     data, age = read_cache(state_root)
-    if age > TTL_S and claim_refresh(state_root):
+    if age > TTL_S and not _backing_off(state_root) and claim_refresh(state_root):
         start_refresh()
     return render(data)
+
+
+def _backing_off(state_root: str) -> bool:
+    try:
+        return time.time() - os.path.getmtime(backoff_path(state_root)) < TTL_S
+    except OSError:
+        return False
