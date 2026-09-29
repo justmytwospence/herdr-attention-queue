@@ -4,24 +4,39 @@
 # then `herdr server reload-config` (or the UI's reload config action).
 
 [ui]
-# With more than one herdr machine connected, herdr 0.9.0's "priority" sort
-# re-sorts the combined Agents list itself and discards plugin views. "spaces"
-# keeps each server's view order (local machine first).
+# With every server on herdr 0.9.1+ and the plugin installed, the selected
+# machine's view orders every machine's agents together, so this setting only
+# applies during brief fallbacks (a machine reconnecting). "spaces" is the
+# fallback that never reorders rows when you click one.
 agent_panel_sort = "spaces"
+# The notifier finds the Ghostty terminal running the herdr client by this
+# title prefix ("herdr "). Set the same on every server you connect to.
+window_title = "herdr {hostname}: {workspace}"
 
 [ui.sidebar.agents]
-# $attn is the plugin's sticky attention state. state_icon is left out: it shows
-# herdr's own status, which reads idle for an agent the plugin keeps done.
+# One line per agent: a coloured state icon, the workspace, and Claude usage.
+# Display rules can only style a token by its own value, not replace its text,
+# so the plugin reports the icon as its own token ($attn_icon) and the rules
+# match the glyphs (Nerd Font, written as escapes):
+#   blocked \uf06a  done \uf058  working \uf144  waiting \uf252  idle \uf10c
+#   unknown \uf059
+# state_icon is left out: it shows herdr's own status, which reads idle for an
+# agent the plugin keeps done.
 rows = [
-  [{ token = "$attn", rules = [
-    { equals = "blocked", fg = "#cc6666", bold = true },
-    { equals = "done", fg = "#a78300", bold = true },
-    { equals = "working", fg = "#428b00" },
-    { equals = "idle", dim = true },
-    { equals = "unknown", dim = true },
-  ] }, "workspace", "tab"],
-  ["agent", { token = "$usage", dim = true }],
+  [{ token = "$attn_icon", rules = [
+    { equals = "\uf06a", fg = "#cc6666", bold = true },
+    { equals = "\uf058", fg = "#a78300", bold = true },
+    { equals = "\uf144", fg = "#428b00" },
+    { equals = "\uf252", fg = "#0072d4" },
+    { equals = "\uf10c", dim = true },
+    { equals = "\uf059", dim = true },
+  ] }, "workspace", { token = "$usage", dim = true }],
 ]
+
+[keys]
+# Focus the Nth agent of the combined list, across machines. The notifier
+# sends this key to switch the client to another machine on a click.
+focus_agent = "prefix+alt+1..9"
 
 # Actions run against the focused pane. Carry the same bindings in the config of
 # every herdr server you connect to as a machine.

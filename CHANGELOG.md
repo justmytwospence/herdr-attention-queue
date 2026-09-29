@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0
+
+- **waiting** state (rank 3, between working and idle): herdr says working on a
+  `background_*` detection rule (Claude background agents or MCP tasks), or the
+  agent's `bg` token counts pending background work after its turn ended. A
+  finished turn with background work pending waits, then becomes done.
+- `attn_icon` token: a Nerd Font glyph per state, so rows can show a coloured
+  icon instead of the word. Ranks are now blocked 0, done 1, working 2,
+  waiting 3, idle 4, unknown 5.
+- On herdr 0.9.2+, herdr's `completion_seq` decides done, so restored agents
+  and pi `/new` no longer read done; the old heuristic stays for older servers.
+- A detached ticker polls every 3 s while agents are working or waiting, since
+  detection rules and tokens change without events.
+- Transition log (`transitions.jsonl`) and `attention.py follow`; a
+  `pane.focused` hook logs focus.
+- `attention.py notifier`: macOS notifications for every herdr machine (local
+  and saved machines over ssh) that focus the right Ghostty terminal, machine
+  and pane on click. Replaces herdr-focus-notify.
+- `verify.py` reports versions, checks icons and `bg`, and runs on every
+  machine with `--all-machines`.
+- Requires herdr 0.9.1: the selected machine's view orders every machine's
+  agents, so the combined list is one queue and never reorders on a click.
+
 ## 0.2.1
 
 - A failed usage fetch (no token, HTTP 429, offline) waits five minutes before

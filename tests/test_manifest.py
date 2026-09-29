@@ -57,5 +57,18 @@ class ManifestTest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(ROOT, "attention.py")))
 
 
+@unittest.skipIf(tomllib is None, "tomllib needs Python 3.11+")
+class ExampleConfigTest(unittest.TestCase):
+    def test_example_rules_cover_every_state_icon(self):
+        from attention_queue import model
+
+        with open(os.path.join(ROOT, "examples", "config.toml"), "rb") as f:
+            example = tomllib.load(f)
+        row = example["ui"]["sidebar"]["agents"]["rows"][0]
+        icon = next(t for t in row if isinstance(t, dict) and t.get("token") == "$attn_icon")
+        self.assertEqual({r["equals"] for r in icon["rules"]}, set(model.ICON.values()))
+        self.assertTrue(example["ui"]["window_title"].startswith("herdr "))
+
+
 if __name__ == "__main__":
     unittest.main()

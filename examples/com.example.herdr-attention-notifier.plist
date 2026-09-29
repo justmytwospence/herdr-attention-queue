@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for the herdr-attention-queue notifier. Replace PLUGIN_ROOT with
+  the plugin checkout (or `herdr plugin list` path) and HOME with your home
+  directory, copy to ~/Library/LaunchAgents/, then:
+
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.herdr-attention-notifier.plist
+
+  PATH must reach herdr, alerter and ssh. The log is
+  ~/.local/state/herdr/plugins/attention-queue/notifier/notifier.log.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.herdr-attention-notifier</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>-B</string>
+    <string>PLUGIN_ROOT/attention.py</string>
+    <string>notifier</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardErrorPath</key>
+  <string>HOME/.local/state/herdr/plugins/attention-queue/notifier/stderr.log</string>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+</dict>
+</plist>
