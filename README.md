@@ -150,8 +150,8 @@ Turn either off in `config.json` in the plugin config directory
 
 ### Attention navigation
 
-The example binds **Ctrl-b Alt-n / Alt-p**, mirroring tmux's next/previous
-window with an alert. Candidates are rendered `blocked` then sticky `done`,
+The example binds **Ctrl-b Ctrl-n / Ctrl-p**; plain `n/p` remain available
+for ordinary space navigation. Candidates are rendered `blocked` then sticky `done`,
 oldest state-entry millisecond first, with layout order breaking ties. Starting
 from a shell, an absent anchor, or an ineligible agent picks the highest-priority
 candidate in either direction. Otherwise traversal wraps through every eligible

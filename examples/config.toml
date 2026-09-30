@@ -41,16 +41,16 @@ prefix = "ctrl+b"
 # sends this key to switch the client to another machine on a click.
 focus_agent = "prefix+alt+1..9"
 
-# tmux's next/previous alert window: actionable agents on the selected server.
+# Ctrl-b Ctrl-n/p: actionable agents on the selected server.
 # Navigation does not acknowledge; native indexed focus above spans machines.
 [[keys.command]]
-key = "prefix+alt+n"
+key = "prefix+ctrl+n"
 type = "plugin_action"
 command = "attention-queue.next-attention"
 description = "attention: next actionable agent (this server)"
 
 [[keys.command]]
-key = "prefix+alt+p"
+key = "prefix+ctrl+p"
 type = "plugin_action"
 command = "attention-queue.previous-attention"
 description = "attention: previous actionable agent (this server)"
