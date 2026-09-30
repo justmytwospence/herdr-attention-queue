@@ -30,6 +30,9 @@ class FakeHerdr:
         self.calls = []
         self.violations = []
         self.view = None
+        self.focus = None
+        self.before_list = None
+        self.before_focus = None
         # 0.9.2 added completion_seq; older servers omit it.
         self.version = "0.9.1"
         self.rules = {}
@@ -147,6 +150,11 @@ class FakeHerdr:
             conn.sendall((json.dumps(reply) + "\n").encode())
 
     def _dispatch(self, method, params):
+        # Test-controlled churn outside the fake lock (fixture helpers lock).
+        callback = self.before_list if method == "agent.list" else (
+            self.before_focus if method == "agent.focus" else None)
+        if callback:
+            callback(params)
         with self._lock:
             self.calls.append((method, json.loads(json.dumps(params))))
             if method == "agent.list":
@@ -190,6 +198,17 @@ class FakeHerdr:
                         "matched_rule": {"id": rule, "state": "working"} if rule else None,
                     },
                 }
+            if method == "agent.focus":
+                pane = params.get("target")
+                if pane not in self.agents:
+                    raise FakeError("agent_not_found", str(pane))
+                agent = self.agents[pane]
+                self.focus = (agent["workspace_id"], agent["tab_id"], pane)
+                if agent["agent_status"] == "done":
+                    agent["agent_status"] = "idle"
+                return {"type": "agent_focus"}
+            if method == "notification.show":
+                return {"type": "ok"}
             if method == "pane.report_metadata":
                 return self._report_metadata(params)
             if method == "agent.view.set":

@@ -140,11 +140,36 @@ Turn either off in `config.json` in the plugin config directory
 
 | action | does |
 |---|---|
+| `attention-queue.next-attention` | focus the next blocked/sticky-done agent on this server |
+| `attention-queue.previous-attention` | traverse that queue in reverse |
 | `attention-queue.mark-reviewed` | clear done on the focused agent |
 | `attention-queue.mark-unread` | put the focused idle agent back into done |
 | `attention-queue.mark-all-reviewed` | clear done on every agent on this server |
 | `attention-queue.reapply` | set the Agents view and refresh every agent's tokens |
 | `attention-queue.clear` | remove the plugin's tokens and view (run before uninstalling) |
+
+### Attention navigation
+
+The example binds **Ctrl-b Alt-n / Alt-p**, mirroring tmux's next/previous
+window with an alert. Candidates are rendered `blocked` then sticky `done`,
+oldest state-entry millisecond first, with layout order breaking ties. Starting
+from a shell, an absent anchor, or an ineligible agent picks the highest-priority
+candidate in either direction. Otherwise traversal wraps through every eligible
+agent. Empty queues show a best-effort notice; a sole current candidate stays put.
+Working, waiting, idle and rendered unknown are excluded; detection flaps retain
+the model's existing state. Focus targets the exact agent's workspace/tab/pane,
+including zoomed tabs, without simulating keys or acknowledging its work.
+**Viewing never clears sticky done**; use `Ctrl-b a` to mark it reviewed.
+
+The invocation's pane (or plugin context) anchors traversal, not another client's
+server-wide focus. Identity and eligibility are reread before focus; churn permits
+one reselection. Ambiguous focus timeouts are not retried. No durable cursor,
+state format change, view filtering or acknowledgement is introduced.
+
+These actions traverse only the **selected server/session**, even though the
+sidebar's combined list spans machines. Native Goto and indexed `Alt-1..9` remain
+available across machines. Herdr has no supported client-aware machine-switch
+API; queue navigation deliberately does not use the notifier's Ghostty injection.
 
 ## Multiple machines
 
@@ -264,6 +289,8 @@ directory; it can also map machine labels to paths. The log is
 
 ```sh
 python3 -m unittest discover -s tests -t . -v
+# Opt-in: creates and deletes only a uniquely named, isolated Herdr test session.
+HERDR_NAVIGATION_LIVE=1 python3 -m unittest tests.test_navigation_live -v
 python3 scripts/verify.py        # read-only check against a live server
 python3 scripts/verify.py --all-machines
 ```

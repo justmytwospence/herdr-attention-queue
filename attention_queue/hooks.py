@@ -11,10 +11,11 @@ import subprocess
 import sys
 import time
 
-from . import config, herdr, labels, model, translog, usage
+from . import config, herdr, labels, model, navigation, translog, usage
 from . import store as store_mod
 
-ACTIONS = ("mark-reviewed", "mark-unread", "mark-all-reviewed", "reapply", "clear")
+ACTIONS = ("mark-reviewed", "mark-unread", "mark-all-reviewed", "reapply", "clear",
+           "next-attention", "previous-attention")
 # Tokens this plugin owns besides the attention ones.
 EXTRA_TOKEN_NAMES = ("usage", model.ROW_TOKEN)
 
@@ -564,8 +565,74 @@ def reseed() -> int:
     return 0
 
 
+def navigation_anchor():
+    pane = os.environ.get("HERDR_PANE_ID")
+    if pane:
+        return pane
+    try:
+        context = json.loads(os.environ.get("HERDR_PLUGIN_CONTEXT_JSON") or "{}")
+        pane = context.get("focused_pane_id")
+        return pane if isinstance(pane, str) else None
+    except (ValueError, AttributeError):
+        return None
+
+
+def navigation_snapshot(store):
+    """Reconcile/publish normally, never acknowledging; release lock before focus."""
+    with store.locked(LOCK_TIMEOUT_S):
+        st = store.load()
+        before = store.dumps(st)
+        agents, completions = read_truth()
+        now, changes = time.time_ns(), []
+        pending = reconcile(st, agents, {}, now, completions, None, changes)
+        publish(store, st, agents, pending, changes, now)
+        store.save_if_changed(st, before)
+    ensure_ticker(store, st)
+    return agents, st["live"]
+
+
+def navigate(store, direction):
+    anchor = navigation_anchor()
+    for attempt in range(2):
+        agents, live = navigation_snapshot(store)
+        target = navigation.select(agents, live, anchor, direction)
+        if target is None:
+            message = "No agents need attention on this server"
+            print("attention-queue: " + message)
+            try:
+                herdr.call("notification.show", {"title": message, "sound": "none"})
+            except (herdr.HerdrError, herdr.Unavailable):
+                pass
+            return 0
+        expected = navigation.signature(target, live)
+        # A fresh reconciled read catches a moved/replaced/closed agent and
+        # changes to rendered eligibility. No focus RPC holds the state lock.
+        current, live = navigation_snapshot(store)
+        found = next((t for t in current if t.pane_id == target.pane_id), None)
+        if found is None or navigation.signature(found, live) != expected:
+            continue
+        if target.pane_id == anchor:
+            return 0  # The anchor is the sole eligible agent.
+        try:
+            herdr.call("agent.focus", {"target": target.pane_id})
+            return 0
+        except herdr.HerdrError as e:
+            # A definitive stale-target rejection permits one fresh selection.
+            if e.code not in ("agent_not_found", "pane_not_found"):
+                print("attention-queue: focus failed: %s" % e)
+                return 0
+        except herdr.Unavailable as e:
+            # A timeout may have focused successfully. Never blindly retry it.
+            print("attention-queue: focus outcome unknown; not retrying: %s" % e)
+            return 0
+    print("attention-queue: queue changed during navigation; try again")
+    return 0
+
+
 def action(name: str) -> int:
     store = open_store()
+    if name in ("next-attention", "previous-attention"):
+        return navigate(store, 1 if name == "next-attention" else -1)
     if name == "clear":
         return clear(store)
     with store.locked(LOCK_TIMEOUT_S):

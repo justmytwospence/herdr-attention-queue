@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+- `next-attention` / `previous-attention` actions traverse blocked and sticky-done
+  agents on the selected server/session. The example binds Ctrl-b Alt-n / Alt-p
+  like tmux's alert-window navigation. Priority, millisecond timestamps and layout
+  ties match the sidebar. Navigation never acknowledges work or changes the view.
+- Revalidate agent identity/location/eligibility before focus, with one reselection
+  on churn; focus runs outside the state lock and ambiguous timeouts are not retried.
+
 ## 0.4.2
 
 - A running ticker notices when the plugin's code changes (an update or a
