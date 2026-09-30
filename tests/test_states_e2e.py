@@ -137,6 +137,7 @@ class TickerTest(HookTestCase):
         import os
         import tempfile
         import shutil
+        import subprocess
         from tests.test_hooks_e2e import ROOT
 
         # A copy of the plugin, so the test can "update" it.
@@ -147,9 +148,14 @@ class TickerTest(HookTestCase):
         self.fake.add_agent("w1:p1", "working")
         self.run_hook("event", event=self.status_event("w1:p1"), HERDR_PLUGIN_ROOT=root)
         self.assertTrue(self.wait_for(self.ticker_running))
-        pids = lambda: set(
-            os.popen("pgrep -f '%s/attention.py ticker'" % root).read().split()
-        )
+        # No shell: on Linux `sh -c pgrep ...` matches its own command line,
+        # so the old os.popen predicate saw two PIDs instead of one forever.
+        def pids():
+            result = subprocess.run(
+                ["pgrep", "-f", root + "/attention.py ticker"],
+                capture_output=True, text=True,
+            )
+            return set(result.stdout.split())
         self.assertTrue(self.wait_for(lambda: len(pids()) == 1))
         first = pids()
         model_py = os.path.join(root, "attention_queue", "model.py")
