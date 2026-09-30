@@ -87,6 +87,9 @@ def check() -> int:
             problems.append("%s: rank %s does not match %s" % (t.pane_id, tokens.get("attn_rank"), attn))
         if len(tokens.get("attn_ts", "")) != 13 or not tokens["attn_ts"].isdigit():
             problems.append("%s: malformed attn_ts %r" % (t.pane_id, tokens.get("attn_ts")))
+        row = tokens.get(model.ROW_TOKEN, "")
+        if not row.startswith(model.ICON.get(attn, "?")):
+            problems.append("%s: attn_row %r does not start with the %s icon" % (t.pane_id, row, attn))
         if tokens.get("attn_icon") != model.ICON.get(attn):
             problems.append("%s: icon %r does not match %s" % (t.pane_id, tokens.get("attn_icon"), attn))
         if attn == "done" and model.raw_status(t.status) in model.BUSY:

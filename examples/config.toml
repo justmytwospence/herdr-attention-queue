@@ -14,23 +14,25 @@ agent_panel_sort = "spaces"
 window_title = "herdr {hostname}: {workspace}"
 
 [ui.sidebar.agents]
-# One line per agent: a coloured state icon, the workspace, and Claude usage.
-# Display rules can only style a token by its own value, not replace its text,
-# so the plugin reports the icon as its own token ($attn_icon) and the rules
-# match the glyphs (Nerd Font, written as escapes):
+# One line per agent: the state icon and workspace, coloured by state, then
+# Claude usage. $attn_row is "<icon> <workspace>" as one token, because herdr
+# puts " · " between any two row tokens except after its own state_icon.
+# Display rules style a token by its own value, so they match the leading glyph
+# (Nerd Font, written as escapes):
 #   blocked \uf06a  done \uf058  working \uf144  waiting \uf252  idle \uf10c
 #   unknown \uf059
+# ($attn_icon is the glyph alone, for a layout that keeps "workspace" separate.)
 # state_icon is left out: it shows herdr's own status, which reads idle for an
 # agent the plugin keeps done.
 rows = [
-  [{ token = "$attn_icon", rules = [
-    { equals = "\uf06a", fg = "#cc6666", bold = true },
-    { equals = "\uf058", fg = "#a78300", bold = true },
-    { equals = "\uf144", fg = "#428b00" },
-    { equals = "\uf252", fg = "#0072d4" },
-    { equals = "\uf10c", dim = true },
-    { equals = "\uf059", dim = true },
-  ] }, "workspace", { token = "$usage", dim = true }],
+  [{ token = "$attn_row", rules = [
+    { starts_with = "\uf06a", fg = "#cc6666", bold = true },
+    { starts_with = "\uf058", fg = "#a78300", bold = true },
+    { starts_with = "\uf144", fg = "#428b00" },
+    { starts_with = "\uf252", fg = "#0072d4" },
+    { starts_with = "\uf10c", dim = true },
+    { starts_with = "\uf059", dim = true },
+  ] }, { token = "$usage", dim = true }],
 ]
 
 [keys]

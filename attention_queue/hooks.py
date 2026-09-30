@@ -16,7 +16,7 @@ from . import store as store_mod
 
 ACTIONS = ("mark-reviewed", "mark-unread", "mark-all-reviewed", "reapply", "clear")
 # Tokens this plugin owns besides the attention ones.
-EXTRA_TOKEN_NAMES = ("usage",)
+EXTRA_TOKEN_NAMES = ("usage", model.ROW_TOKEN)
 
 # Seconds between reseed passes after a server start; sums to 150.
 DEFAULT_RESEED_SCHEDULE = (1, 1, 1, 2, 2, 3, 5, 5, 10, 10, 10, 20, 20, 30, 30)
@@ -192,9 +192,24 @@ def reconcile(
     return pending
 
 
-def decorate(st: dict, agents, pending: dict) -> dict:
-    """Add the usage token and Claude session names to what reconcile wants written.
+def workspace_labels(store: store_mod.Store):
+    """{workspace_id: label}, or None when herdr cannot say."""
+    try:
+        workspaces = herdr.call("workspace.list", {}).get("workspaces") or []
+    except (herdr.Unavailable, herdr.HerdrError) as e:
+        debug(store, "workspace.list failed: %s" % e)
+        return None
+    return {
+        w.get("workspace_id"): w["label"]
+        for w in workspaces
+        if isinstance(w, dict) and isinstance(w.get("label"), str)
+    }
 
+
+def decorate(st: dict, agents, pending: dict, workspaces=None) -> dict:
+    """Add usage, the attn_row token and Claude session names to what reconcile wants written.
+
+    `workspaces` maps workspace ids to labels; without it attn_row is left as is.
     Returns {pane_id: name} for every named Claude pane; a pane whose name is new
     gets an entry in `pending` (possibly with no tokens) so the name is reported.
     """
@@ -205,6 +220,12 @@ def decorate(st: dict, agents, pending: dict) -> dict:
         if text and t.tokens.get("usage") != text:
             want = dict(pending.get(t.pane_id) or {})
             want["usage"] = text
+        rec = st["live"].get(t.terminal_id)
+        if workspaces is not None and rec is not None:
+            row = model.row_text(rec["attn"], workspaces.get(t.workspace_id))
+            if t.tokens.get(model.ROW_TOKEN) != row:
+                want = dict(want if want is not None else pending.get(t.pane_id) or {})
+                want[model.ROW_TOKEN] = row
         if config.enabled("claude_names") and t.agent == "claude":
             name = labels.claude_name(t.session)
             rec = st["live"].get(t.terminal_id)
@@ -219,18 +240,11 @@ def decorate(st: dict, agents, pending: dict) -> dict:
     return names
 
 
-def log_changes(store: store_mod.Store, st: dict, changes, now_ns: int) -> None:
+def log_changes(store: store_mod.Store, st: dict, changes, now_ns: int, workspaces=None) -> None:
     """Append attn changes to the transition log (under the session lock)."""
     if not changes:
         return
-    labels_by_id = {}
-    if any(rec["attn"] in ("blocked", "done") for _, _, rec in changes):
-        try:
-            for w in herdr.call("workspace.list", {}).get("workspaces") or []:
-                if isinstance(w, dict) and isinstance(w.get("label"), str):
-                    labels_by_id[w.get("workspace_id")] = w["label"]
-        except (herdr.Unavailable, herdr.HerdrError) as e:
-            debug(store, "workspace.list failed: %s" % e)
+    labels_by_id = workspaces or {}
     restoring = restoring_at(st, now_ns)
     lines = []
     for t, prev, rec in changes:
@@ -249,9 +263,10 @@ def log_changes(store: store_mod.Store, st: dict, changes, now_ns: int) -> None:
 def publish(store: store_mod.Store, st: dict, agents, pending: dict, changes, now_ns: int) -> None:
     """Write tokens and names, and log the attention changes."""
     st.pop("cleared", None)
-    names = decorate(st, agents, pending)
+    workspaces = workspace_labels(store)
+    names = decorate(st, agents, pending, workspaces)
     write_tokens(store, st, pending, names)
-    log_changes(store, st, changes, now_ns)
+    log_changes(store, st, changes, now_ns, workspaces)
 
 
 def write_tokens(store: store_mod.Store, st: dict, pending: dict, names=None) -> None:

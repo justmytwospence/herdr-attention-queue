@@ -53,9 +53,12 @@ client config; see [`examples/config.toml`](examples/config.toml).
   click. If you ever clicked the Agents header's sort toggle, herdr saved that
   choice in `~/.local/state/herdr/client-shell/*.json`, and it overrides config:
   detach, delete the `agent_panel_sort` key from that file, and reattach.
-- **Rows.** Render `$attn_icon` in `[ui.sidebar.agents]` rows, coloured with
-  rules. Display rules style a token by its own value and cannot replace its
-  text, so the icon is a token of its own and the rules match its glyphs.
+- **Rows.** Render `$attn_row` (state icon and workspace, one token) in
+  `[ui.sidebar.agents]` rows, coloured with `starts_with` rules on the glyphs.
+  Display rules style a token by its own value and cannot replace its text, so
+  the icon is a token of its own; and herdr puts " · " between any two row
+  tokens except after its built-in `state_icon`, so the icon and workspace share
+  one token to read "icon name". The whole label takes the state colour.
 - **Keys.** Bind actions with `type = "plugin_action"`, and `focus_agent` for
   the notifier's machine switch.
 - **Window title.** `window_title = "herdr {hostname}: {workspace}"` lets the
@@ -69,6 +72,7 @@ Tokens reported on each agent pane (source `plugin:attention-queue`):
 | `attn_rank` | `0` to `5`, in that order |
 | `attn_ts` | wall-clock milliseconds when the agent entered its current state, zero-padded |
 | `attn_icon` | a Nerd Font glyph per state (below) |
+| `attn_row` | the glyph, a space, and the workspace label, e.g. `\uf058 data-pipeline` |
 | `usage` | Claude plan usage, e.g. `󰥔 38% 7h55m 󰃭 15% 6d 󰁨 8% 󰄔 $154.21/$150 off` (see below) |
 
 | state | icon | glyph |
@@ -217,8 +221,8 @@ directory; it can also map machine labels to paths. The log is
 
 ## How it works
 
-- Hooks on `pane.agent_status_changed`, `pane.agent_detected` and `pane.closed`
-  re-read `agent.list` under a lock and advance each agent through a pure state
+- Hooks on `pane.agent_status_changed`, `pane.agent_detected`, `pane.closed` and
+  `workspace.renamed` re-read `agent.list` under a lock and advance each agent through a pure state
   machine (`attention_queue/model.py`).
   - herdr events carry no previous status, and viewing a pane emits no event.
   - On herdr 0.9.2+ a completion is herdr's `completion_seq`. On older servers

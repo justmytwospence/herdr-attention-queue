@@ -33,6 +33,7 @@ class FakeHerdr:
         # 0.9.2 added completion_seq; older servers omit it.
         self.version = "0.9.1"
         self.rules = {}
+        self.workspace_names = {}
         self._seqs = {}
         self._next_seq = 0
         self._lock = threading.Lock()
@@ -170,7 +171,10 @@ class FakeHerdr:
                         ids.append(wid)
                 return {
                     "type": "workspace_list",
-                    "workspaces": [{"workspace_id": w, "label": "ws " + w} for w in ids],
+                    "workspaces": [
+                        {"workspace_id": w, "label": self.workspace_names.get(w, "ws " + w)}
+                        for w in ids
+                    ],
                 }
             if method == "ping":
                 return {"type": "pong", "version": self.version, "protocol": 22}

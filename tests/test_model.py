@@ -328,6 +328,11 @@ class TokenTest(unittest.TestCase):
             tokens = model.tokens_for({"attn": state, "attn_ns": 0})
             self.assertEqual(tokens["attn_icon"], model.ICON[state])
 
+    def test_row_text(self):
+        self.assertEqual(model.row_text("done", "data-pipeline"), model.ICON["done"] + " data-pipeline")
+        self.assertEqual(model.row_text("waiting", None), model.ICON["waiting"])
+        self.assertEqual(model.row_text("bogus", "x"), model.ICON["unknown"] + " x")
+
     def test_view_sort_never_uses_view_or_per_server_fields(self):
         fields = [s["field"] for s in model.VIEW_SORT]
         for banned in ("seen", "attention", "status", "state_change_seq"):

@@ -46,6 +46,10 @@ ICON = {
     "unknown": "\uf059",  # nf-fa-question_circle
 }
 TOKEN_NAMES = ("attn", "attn_rank", "attn_ts", "attn_icon")
+# The icon and workspace label as one token. herdr puts " · " between any two
+# row tokens except after its built-in state_icon, so a row of $attn_icon and
+# workspace reads "icon · name"; one token reads "icon name".
+ROW_TOKEN = "attn_row"
 # Pane token an agent reports with its count of pending background work.
 BG_TOKEN = "bg"
 # Detection rules that mean "working, but only on background work".
@@ -273,6 +277,12 @@ def tokens_for(rec: dict) -> Dict[str, str]:
         "attn_ts": "%013d" % (rec["attn_ns"] // 1000000),
         "attn_icon": ICON[attn],
     }
+
+
+def row_text(attn: str, workspace: Optional[str]) -> str:
+    """`attn_row`: the state icon, then the workspace label."""
+    icon = ICON.get(attn, ICON["unknown"])
+    return "%s %s" % (icon, workspace) if workspace else icon
 
 
 def durable_from(rec: dict, now_ns: int) -> dict:

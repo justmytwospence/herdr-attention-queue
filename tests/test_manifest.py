@@ -65,8 +65,8 @@ class ExampleConfigTest(unittest.TestCase):
         with open(os.path.join(ROOT, "examples", "config.toml"), "rb") as f:
             example = tomllib.load(f)
         row = example["ui"]["sidebar"]["agents"]["rows"][0]
-        icon = next(t for t in row if isinstance(t, dict) and t.get("token") == "$attn_icon")
-        self.assertEqual({r["equals"] for r in icon["rules"]}, set(model.ICON.values()))
+        icon = next(t for t in row if isinstance(t, dict) and t.get("token") == "$attn_row")
+        self.assertEqual({r["starts_with"] for r in icon["rules"]}, set(model.ICON.values()))
         self.assertTrue(example["ui"]["window_title"].startswith("herdr "))
 
 

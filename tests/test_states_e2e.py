@@ -39,6 +39,26 @@ class WaitingE2ETest(HookTestCase):
         self.assertEqual(f.count("pane.report_metadata"), reports)
 
 
+class RowTokenTest(HookTestCase):
+    def row(self, pane):
+        return self.fake.tokens(pane).get(model.ROW_TOKEN)
+
+    def test_row_is_icon_and_workspace_and_follows_state_and_renames(self):
+        f = self.fake
+        f.add_agent("w1:p1", "working")
+        self.event("w1:p1")
+        self.assertEqual(self.row("w1:p1"), model.ICON["working"] + " ws w1")
+        f.set_status("w1:p1", "idle")
+        self.event("w1:p1")
+        self.assertEqual(self.row("w1:p1"), model.ICON["done"] + " ws w1")
+        f.workspace_names["w1"] = "data-pipeline"
+        self.run_hook("event", event={"event": "workspace_renamed", "data": {"workspace_id": "w1"}})
+        self.assertEqual(self.row("w1:p1"), model.ICON["done"] + " data-pipeline")
+        self.run_hook("action", "clear")
+        self.assertIsNone(self.row("w1:p1"))
+        self.assertEqual(f.violations, [])
+
+
 class CompletionSeqE2ETest(HookTestCase):
     def setUp(self):
         super().setUp()

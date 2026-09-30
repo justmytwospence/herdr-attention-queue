@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- `attn_row` token: the state icon and the workspace label as one value
+  (`\uf058 data-pipeline`). herdr separates row tokens with " · " except after
+  its built-in state_icon, so `$attn_icon` followed by `workspace` read
+  "icon · name". Render `$attn_row` with `starts_with` rules on the glyphs; the
+  whole label takes the state colour. A `workspace.renamed` hook keeps it
+  current. `attn_icon` stays for layouts that want the glyph alone.
+
 ## 0.3.1
 
 - The notifier's machine switch works: it writes the prefix and alt+N as
