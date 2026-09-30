@@ -185,7 +185,9 @@ Clicking it:
    `herdr --machine` for remote ones);
 3. if the client shows another machine, sends the `focus_agent` key (prefix,
    then alt+N) for the agent's position N in the combined list, then confirms
-   the switch and retries once. herdr has no API to make a client switch
+   the switch and retries once. It writes the keys as kitty-protocol sequences
+   with Ghostty's `perform action`, assuming the prefix is ctrl+b; set
+   `"prefix_csi"` to your prefix's CSI body otherwise (`"32;5u"` is ctrl+space). herdr has no API to make a client switch
    machines. Above position 9 there is no key; the pane is still focused on its
    machine.
 
@@ -205,7 +207,8 @@ Options go under `"notifier"` in `config.json` in the plugin config directory:
 ```json
 {"notifier": {"local_session": "default",
               "remote_entry": "~/dotfiles/plugins/herdr-attention-queue/attention.py",
-              "alerter": "/opt/homebrew/bin/alerter"}}
+              "alerter": "/opt/homebrew/bin/alerter",
+              "prefix_csi": "98;5u"}}
 ```
 
 `remote_entry` defaults to the local checkout's path relative to your home

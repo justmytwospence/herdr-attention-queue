@@ -1,6 +1,6 @@
 id = "attention-queue"
 name = "Attention Queue"
-version = "0.3.0"
+version = "0.3.1"
 # 0.9.1: the selected machine's view orders every machine's agents together.
 min_herdr_version = "0.9.1"
 description = "Sticky done-until-you-act agent state with waiting for background work, an attention-ordered Agents view across machines, state icons, Claude usage on every row, and a macOS notifier."

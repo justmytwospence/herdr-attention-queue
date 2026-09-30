@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+- The notifier's machine switch works: it writes the prefix and alt+N as
+  kitty-protocol sequences with Ghostty's `perform action`. Ghostty's `send key`
+  sends no text or codepoint, so under the kitty keyboard protocol the herdr
+  client enables it produced nothing. A prefix other than ctrl+b is set with
+  `"prefix_csi"` (the key's CSI body, e.g. `"32;5u"` for ctrl+space).
+
 ## 0.3.0
 
 - **waiting** state (rank 3, between working and idle): herdr says working on a

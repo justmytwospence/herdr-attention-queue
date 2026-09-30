@@ -176,9 +176,11 @@ class ContentTest(unittest.TestCase):
 
     def test_scripts_quote_their_strings(self):
         self.assertEqual(notifier.applescript_string('a"b\\c'), '"a\\"b\\\\c"')
-        script = notifier.jump_script(3, "digit_N")
-        self.assertIn('send key "digit_3" modifiers "option"', script)
-        self.assertIn('send key "b" modifiers "control"', script)
+        self.assertEqual(notifier.jump_sequences(3), ["98;5u", "51;3u"])
+        self.assertEqual(notifier.jump_sequences(9, "32;5u"), ["32;5u", "57;3u"])
+        script = notifier.jump_script(3)
+        self.assertIn('perform action "csi:98;5u" on s', script)
+        self.assertIn('perform action "csi:51;3u" on s', script)
         self.assertIn('starts with "herdr "', notifier.focus_script())
 
 

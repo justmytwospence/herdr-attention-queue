@@ -249,17 +249,30 @@ end tell
 """ % applescript_string(prefix)
 
 
-def jump_script(n: int, digit_key: str, prefix_key: str = "b", prefix_mods: str = "control", prefix: str = HERDR_TITLE_PREFIX) -> str:
+# The herdr client turns on the kitty keyboard protocol, and Ghostty's `send key`
+# carries no text or codepoint, so under that protocol it emits nothing. `perform
+# action "csi:..."` writes the exact sequences a real keypress would produce.
+PREFIX_SEQUENCE = "98;5u"  # ctrl+b
+ALT_DIGIT_SEQUENCE = "%d;3u"  # alt+<digit>, by the digit's codepoint
+
+
+def jump_sequences(n: int, prefix: str = PREFIX_SEQUENCE) -> List[str]:
+    """Kitty-protocol CSI bodies for the herdr prefix, then alt+N."""
+    return [prefix, ALT_DIGIT_SEQUENCE % (ord("0") + n)]
+
+
+def jump_script(n: int, prefix_sequence: str = PREFIX_SEQUENCE, prefix: str = HERDR_TITLE_PREFIX) -> str:
     """Send the herdr prefix, then alt+N, to the herdr client's terminal."""
+    first, second = jump_sequences(n, prefix_sequence)
     return """
 tell application "Ghostty"
     repeat with w in windows
         repeat with t in tabs of w
             repeat with s in terminals of t
                 if name of s starts with %(prefix)s then
-                    send key %(pkey)s modifiers %(pmods)s to s
+                    perform action %(first)s on s
                     delay 0.05
-                    send key %(dkey)s modifiers "option" to s
+                    perform action %(second)s on s
                     return "sent"
                 end if
             end repeat
@@ -269,9 +282,8 @@ tell application "Ghostty"
 end tell
 """ % {
         "prefix": applescript_string(prefix),
-        "pkey": applescript_string(prefix_key),
-        "pmods": applescript_string(prefix_mods),
-        "dkey": applescript_string(digit_key.replace("N", str(n))),
+        "first": applescript_string("csi:" + first),
+        "second": applescript_string("csi:" + second),
     }
 
 
@@ -285,7 +297,8 @@ class SystemIO:
         self.settings = settings
         self.alerter = settings.get("alerter") or shutil.which("alerter") or "/opt/homebrew/bin/alerter"
         self.herdr = settings.get("herdr") or shutil.which("herdr") or "/opt/homebrew/bin/herdr"
-        self.digit_key = settings.get("digit_key") or "digit_N"
+        # CSI body of the herdr prefix key in the kitty protocol; ctrl+b by default.
+        self.prefix_sequence = settings.get("prefix_csi") or PREFIX_SEQUENCE
 
     def now_ms(self) -> int:
         return int(time.time() * 1000)
@@ -381,11 +394,7 @@ class SystemIO:
         return self.run([self.herdr, "--machine", machine.key, "agent", "focus", pane_id], timeout=10) is not None
 
     def jump(self, n: int) -> bool:
-        out = self.osascript(jump_script(n, self.digit_key))
-        if out is None and self.digit_key == "digit_N":
-            # Older Ghostty key names: fall back to the bare digit.
-            out = self.osascript(jump_script(n, "N"))
-        return out == "sent"
+        return self.osascript(jump_script(n, self.prefix_sequence)) == "sent"
 
 
 # -- the notifier ------------------------------------------------------------------
