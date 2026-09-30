@@ -72,7 +72,7 @@ Tokens reported on each agent pane (source `plugin:attention-queue`):
 | `attn_rank` | `0` to `5`, in that order |
 | `attn_ts` | wall-clock milliseconds when the agent entered its current state, zero-padded |
 | `attn_icon` | a Nerd Font glyph per state (below) |
-| `attn_row` | the glyph, a space, and the workspace label, e.g. `\uf058 data-pipeline` |
+| `attn_row` | the glyph, two spaces, and the workspace label, e.g. `\uf058  data-pipeline` |
 | `usage` | Claude plan usage, e.g. `󰥔 38% 7h55m 󰃭 15% 6d 󰁨 8% 󰄔 $154.21/$150 off` (see below) |
 
 | state | icon | glyph |

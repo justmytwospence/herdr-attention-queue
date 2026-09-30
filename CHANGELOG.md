@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- `attn_row` puts two spaces between the icon and the workspace name; with one,
+  the Nerd Font glyph looked attached to the name.
+
 ## 0.4.0
 
 - `attn_row` token: the state icon and the workspace label as one value

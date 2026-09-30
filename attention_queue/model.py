@@ -279,10 +279,14 @@ def tokens_for(rec: dict) -> Dict[str, str]:
     }
 
 
+# Nerd Font icons fill their cell, so one space reads as touching the name.
+ROW_GAP = "  "
+
+
 def row_text(attn: str, workspace: Optional[str]) -> str:
-    """`attn_row`: the state icon, then the workspace label."""
+    """`attn_row`: the state icon, a two-space gap, then the workspace label."""
     icon = ICON.get(attn, ICON["unknown"])
-    return "%s %s" % (icon, workspace) if workspace else icon
+    return icon + ROW_GAP + workspace if workspace else icon
 
 
 def durable_from(rec: dict, now_ns: int) -> dict:
