@@ -340,16 +340,42 @@ def explain_background(agents) -> dict:
     return explained
 
 
+def code_signature() -> tuple:
+    """Modification times of the plugin's code, to notice an update underneath."""
+    package = os.path.join(PLUGIN_ROOT, "attention_queue")
+    paths = [os.path.join(PLUGIN_ROOT, "attention.py")]
+    try:
+        paths += [os.path.join(package, n) for n in sorted(os.listdir(package)) if n.endswith(".py")]
+    except OSError:
+        pass
+    signature = []
+    for path in paths:
+        try:
+            signature.append((path, os.stat(path).st_mtime_ns))
+        except OSError:
+            signature.append((path, None))
+    return tuple(signature)
+
+
 def ticker() -> int:
-    """Poll while agents are working or waiting; exit once none are."""
+    """Poll while agents are working or waiting; exit once none are.
+
+    A ticker lives up to an hour, so after a plugin update it would keep
+    writing tokens with the old code. It hands over to a fresh ticker instead.
+    """
     store = open_store()
     guard = store_mod.try_lock(ticker_lock_path(store))
     if guard is None:
         return 0
+    code = code_signature()
+    updated = False
     try:
         quiet = 0
         deadline = time.monotonic() + TICKER_MAX_S
         while quiet < TICKER_IDLE_PASSES and time.monotonic() < deadline:
+            if code_signature() != code:
+                updated = True
+                break
             try:
                 with store.locked(LOCK_TIMEOUT_S):
                     st = store.load()
@@ -373,6 +399,8 @@ def ticker() -> int:
             time.sleep(tick_s())
     finally:
         os.close(guard)
+    if updated:
+        spawn("ticker")
     return 0
 
 

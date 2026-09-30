@@ -133,6 +133,31 @@ class TickerTest(HookTestCase):
         self.assertFalse(self.ticker_running())
         self.assertEqual(self.fake.count("agent.explain"), 0)
 
+    def test_ticker_hands_over_after_a_plugin_update(self):
+        import os
+        import tempfile
+        import shutil
+        from tests.test_hooks_e2e import ROOT
+
+        # A copy of the plugin, so the test can "update" it.
+        root = tempfile.mkdtemp(prefix="aq-root-", dir="/tmp")
+        self.addCleanup(shutil.rmtree, root, True)
+        shutil.copy(os.path.join(ROOT, "attention.py"), root)
+        shutil.copytree(os.path.join(ROOT, "attention_queue"), os.path.join(root, "attention_queue"))
+        self.fake.add_agent("w1:p1", "working")
+        self.run_hook("event", event=self.status_event("w1:p1"), HERDR_PLUGIN_ROOT=root)
+        self.assertTrue(self.wait_for(self.ticker_running))
+        pids = lambda: set(
+            os.popen("pgrep -f '%s/attention.py ticker'" % root).read().split()
+        )
+        self.assertTrue(self.wait_for(lambda: len(pids()) == 1))
+        first = pids()
+        model_py = os.path.join(root, "attention_queue", "model.py")
+        os.utime(model_py, ns=(os.stat(model_py).st_atime_ns, os.stat(model_py).st_mtime_ns + 10**9))
+        self.assertTrue(self.wait_for(lambda: len(pids()) == 1 and pids() != first), "no fresh ticker")
+        self.fake.set_status("w1:p1", "idle")
+        self.assertTrue(self.wait_for(lambda: not pids()))
+
     def test_one_ticker_at_a_time(self):
         self.fake.add_agent("w1:p1", "working")
         self.event("w1:p1")

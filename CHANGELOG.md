@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2
+
+- A running ticker notices when the plugin's code changes (an update or a
+  submodule bump) and hands over to a fresh ticker. Before, it kept writing
+  tokens with the old code for up to an hour, undoing the update.
+
 ## 0.4.1
 
 - `attn_row` puts two spaces between the icon and the workspace name; with one,
