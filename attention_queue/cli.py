@@ -11,7 +11,9 @@ from . import store as store_mod
 USAGE = (
     "usage: attention.py startup | event | focus | reseed | ticker | usage-refresh | action <%s>\n"
     "       attention.py follow --session NAME [--since-ms N]\n"
-    "       attention.py notifier" % "|".join(hooks.ACTIONS)
+    "       attention.py notifier\n"
+    "       attention.py activity blocked|working|idle|clear\n"
+    "       attention.py ask-check [--report] [--else STATE]" % "|".join(hooks.ACTIONS)
 )
 
 
@@ -75,6 +77,16 @@ def main(argv=None) -> int:
         if mode == "ticker" and len(args) == 1:
             _watchdog(hooks.TICKER_MAX_S + 120)
             return hooks.ticker()
+        if mode == "activity" and len(args) == 2:
+            from . import harness
+
+            _watchdog(10)
+            return harness.activity(args[1])
+        if mode == "ask-check":
+            from . import harness
+
+            _watchdog(15)
+            return harness.ask_check(args[1:])
         if mode == "action" and len(args) == 2 and args[1] in hooks.ACTIONS:
             _watchdog(20)
             return hooks.action(args[1])
