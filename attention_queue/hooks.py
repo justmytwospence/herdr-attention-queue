@@ -327,11 +327,14 @@ def tick_s() -> float:
 
 
 def active(st: dict) -> bool:
-    """An agent is working or waiting, or holds an `activity` token.
+    """An agent is working or waiting, or reports itself blocked or working.
 
-    Token changes and expiry emit no plugin event, so the ticker watches them.
+    Token changes and expiry emit no plugin event, so the ticker watches them;
+    a turn the agent ends by reporting `idle` is seen while it still works.
     """
-    return any(r.get("attn") in ACTIVE or r.get("activity") for r in st["live"].values())
+    return any(
+        r.get("attn") in ACTIVE or r.get("activity") in model.BUSY for r in st["live"].values()
+    )
 
 
 def ticker_lock_path(store: store_mod.Store) -> str:

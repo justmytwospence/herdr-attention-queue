@@ -119,40 +119,49 @@ sleeps or monitors, are working, not waiting.
 ## Agent-reported state
 
 herdr's status comes from an agent's integration or from screen rules, and
-both miss things: a question drawn by an extension that no screen rule knows,
-an agent whose integration lost its hold on the pane (herdr then reads its
-spinner, which stays on screen under the question), or work that runs outside
-a turn, like a plan-mode planner run started by a command. Any harness can
-correct that with the pane token `activity`:
+both miss things:
 
-| value | shows | while |
-|---|---|---|
-| `blocked` | blocked | the agent waits on the user |
-| `working` | working | the agent works although herdr sees it idle |
+- a question drawn by an extension or tool that no screen rule knows;
+- an agent whose spinner stays on screen under a question;
+- work outside a turn, like a plan-mode planner run started by a command;
+- agents herdr cannot read after a response: Codex falls back to `unknown`,
+  which on its own would keep a finished Codex turn showing as working.
 
-Blocked from herdr or from the token wins over everything; a reported `working`
-beats herdr's idle, done and waiting. Either clears done, since the agent is
-busy again. Completions still follow herdr's own status. Report it with a TTL
-and refresh it, so a crashed agent cannot leave it behind; clear it when the
-state ends. A token change emits no plugin event, so ask for a refresh after
-each change (otherwise it shows on the next agent event):
+Any harness's hooks can report the agent's status in the pane token
+`activity`, which then stands in for herdr's status:
+
+| value | meaning |
+|---|---|
+| `blocked` | waiting on the user |
+| `working` | running a turn, or working outside one |
+| `idle` | the turn is over |
+
+- herdr's own blocked always wins: a screen rule saw a prompt the hooks missed.
+- A turn the token ends (working to idle, by the token changing or being
+  cleared) is a completion, so the agent shows as done.
+- While the token is set, herdr's own completion signals are not consulted.
+  Answering a reported question is not a completion.
+- Report with a TTL so a crashed agent cannot leave it behind, and clear it at
+  session start.
+
+A token change emits no plugin event, so ask for a refresh after each change
+(otherwise it shows on the next agent event; while an agent reports blocked or
+working, the ticker also watches it):
 
 ```sh
 "$HERDR_BIN_PATH" pane report-metadata "$HERDR_PANE_ID" \
-  --source user:my-bridge --token activity=blocked --ttl-ms 90000
+  --source user:my-bridge --token activity=blocked --ttl-ms 86400000
 "$HERDR_BIN_PATH" plugin action invoke attention-queue.refresh
 ```
 
-While any agent holds an `activity` token, the ticker watches it, so it clears
-on time without another refresh.
+[justmytwospence/dotfiles](https://github.com/justmytwospence/dotfiles) wires
+the three harnesses it uses:
 
-For pi, the bridge in
-[justmytwospence/dotfiles](https://github.com/justmytwospence/dotfiles)
-(`shell/.pi/agent/extensions/herdr-attention-bridge.ts`) reports it: blocked for
-every extension dialog (`ui_prompt_start`) and `herdr:blocked` hold, working
-while an extension holds `herdr:working` on pi's event bus. A dialog opened
-during a `herdr:working` hold is a progress view, not a question; pi-plan-mode
-holds it while its planners run.
+| harness | how |
+|---|---|
+| pi | `shell/.pi/agent/extensions/herdr-attention-bridge.ts`: blocked for every extension dialog (`ui_prompt_start`) and `herdr:blocked` hold; working while an extension holds `herdr:working` (pi-plan-mode's planner runs and replies, whose trace view is a progress view, not a question) |
+| Claude Code | `shell/.local/bin/herdr-activity` from hooks: blocked from `PreToolUse` to `PostToolUse` of `AskUserQuestion` and `ExitPlanMode`; cleared on prompt, stop and session start. Permission prompts are left to herdr's screen rules: no hook fires when one is answered, only when the tool finishes |
+| Codex | the same script: working on `UserPromptSubmit`, idle on `Stop`, cleared on session start. Approval prompts are left to herdr's screen rules, which win over the report |
 
 ## Claude usage and session names
 

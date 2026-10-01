@@ -203,7 +203,8 @@ class ActivityE2ETest(HookTestCase):
         # The ticker watches the token, so its clearing shows without an event.
         self.assertTrue(self.wait_for(self.ticker_running))
         f.set_token("w1:p1", "activity", None)
-        self.assertTrue(self.wait_for(lambda: self.attn("w1:p1") == "idle"))
+        # The planner run ended: a finished turn to review.
+        self.assertTrue(self.wait_for(lambda: self.attn("w1:p1") == "done"))
         self.assertTrue(self.wait_for(lambda: not self.ticker_running()))
         self.assertEqual(f.violations, [])
 
@@ -218,4 +219,18 @@ class ActivityE2ETest(HookTestCase):
         self.assertTrue(self.wait_for(lambda: self.attn("w1:p1") == "working"))
         f.set_status("w1:p1", "idle")
         self.assertTrue(self.wait_for(lambda: self.attn("w1:p1") == "done"))
+        self.assertEqual(f.violations, [])
+
+
+class ReportedTurnE2ETest(HookTestCase):
+    def test_an_agent_herdr_cannot_read_reports_its_turn_and_finishes_as_done(self):
+        f = self.fake
+        f.add_agent("w1:p1", "unknown", agent="codex", session="c")
+        f.set_token("w1:p1", "activity", "working")
+        self.run_hook("action", "refresh")
+        self.assertEqual(self.attn("w1:p1"), "working")
+        self.assertTrue(self.wait_for(self.ticker_running))
+        f.set_token("w1:p1", "activity", "idle")  # its Stop hook; no herdr event
+        self.assertTrue(self.wait_for(lambda: self.attn("w1:p1") == "done"))
+        self.assertTrue(self.wait_for(lambda: not self.ticker_running()))
         self.assertEqual(f.violations, [])

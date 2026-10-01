@@ -212,7 +212,7 @@ class ActivityTest(unittest.TestCase):
     """The agent's own `activity` token corrects what herdr cannot see."""
 
     def test_parsing(self):
-        for value, parsed in [("blocked", "blocked"), (" Working ", "working"), ("idle", None), ("", None)]:
+        for value, parsed in [("blocked", "blocked"), (" Working ", "working"), ("idle", "idle"), ("done", None), ("", None)]:
             with self.subTest(value=value):
                 self.assertEqual(model.activity({"activity": value}), parsed)
         self.assertIsNone(model.activity({}))
@@ -232,17 +232,50 @@ class ActivityTest(unittest.TestCase):
         rec = run([("working", 1), T("idle", 2, tokens={"activity": "blocked", "bg": "1"})])
         self.assertEqual(rec["attn"], "blocked")
 
-    def test_planning_outside_a_turn_is_working_then_idle(self):
+    def test_planning_outside_a_turn_is_working_then_done(self):
         rec = run([("idle", 1), T("idle", 1, tokens={"activity": "working"})])
         self.assertEqual(rec["attn"], "working")
-        self.assertEqual(run([("idle", 1)], rec=rec)["attn"], "idle")
+        self.assertEqual(run([("idle", 1)], rec=rec)["attn"], "done")
 
-    def test_reported_working_clears_done(self):
+    def test_reported_working_clears_done_and_its_end_is_a_new_completion(self):
         rec = run([("working", 1), ("idle", 2)])
         self.assertEqual(rec["attn"], "done")
+        rec = model.apply_ack(rec, T("idle", 2), NOW + 5 * S)
         rec = run([T("idle", 2, tokens={"activity": "working"})], rec=rec)
         self.assertEqual(rec["attn"], "working")
-        self.assertEqual(run([("idle", 2)], rec=rec)["attn"], "idle")
+        self.assertEqual(run([("idle", 2)], rec=rec)["attn"], "done")
+
+    def test_an_agent_herdr_reads_as_unknown_reports_its_own_turns(self):
+        # Codex: herdr says unknown after a response; its hooks report the turn.
+        rec = run([T("unknown", 1, agent="codex", tokens={"activity": "working"})])
+        self.assertEqual(rec["attn"], "working")
+        rec = run([T("unknown", 1, agent="codex", tokens={"activity": "idle"})], rec=rec)
+        self.assertEqual(rec["attn"], "done")
+        rec = model.apply_ack(rec, T("unknown", 1, agent="codex", tokens={"activity": "idle"}), NOW + 9 * S)
+        self.assertEqual(rec["attn"], "idle")
+        # herdr's own churn while the agent reports changes nothing.
+        rec = run([T("working", 2, agent="codex", tokens={"activity": "idle"}),
+                   T("idle", 3, agent="codex", tokens={"activity": "idle"}, completion_seq=3)],
+                  rec=rec, completions=True)
+        self.assertEqual(rec["attn"], "idle")
+        rec = run([T("unknown", 3, agent="codex", tokens={"activity": "working"})], rec=rec)
+        self.assertEqual(rec["attn"], "working")
+
+    def test_herdr_blocked_beats_a_reported_idle_or_working(self):
+        self.assertEqual(run([T("blocked", 1, tokens={"activity": "idle"})])["attn"], "blocked")
+        rec = run([T("working", 1, tokens={"activity": "working"}), T("blocked", 2, tokens={"activity": "working"})])
+        self.assertEqual(rec["attn"], "blocked")
+        # Answered: back to the report; no completion from leaving blocked.
+        rec = run([T("working", 3, tokens={"activity": "working"})], rec=rec)
+        self.assertEqual(rec["attn"], "working")
+
+    def test_reported_blocked_answered_to_idle_is_not_done(self):
+        rec = run([T("idle", 1, tokens={"activity": "blocked"}), T("idle", 1)])
+        self.assertEqual(rec["attn"], "idle")
+
+    def test_first_sight_with_a_reported_idle_is_not_done(self):
+        rec = run([T("done", 4, tokens={"activity": "idle"})])
+        self.assertEqual(rec["attn"], "idle")
 
     def test_herdr_blocked_beats_reported_working(self):
         rec = run([T("blocked", 1, tokens={"activity": "working"})])
