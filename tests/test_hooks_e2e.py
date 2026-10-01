@@ -54,6 +54,8 @@ class HookTestCase(unittest.TestCase):
                 "HERDR_ATTENTION_QUEUE_TICK_S": "0.05",
                 # Never send keys to a real terminal.
                 "HERDR_ATTENTION_QUEUE_OSASCRIPT": "/usr/bin/false",
+                # Never install the pi bridge into the real ~/.pi.
+                "PI_CODING_AGENT_DIR": os.path.join(self.state, "pi-agent"),
             }
         )
         env.update(extra)

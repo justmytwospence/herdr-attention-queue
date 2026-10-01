@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 
-from . import config, herdr, labels, model, navigation, translog, usage
+from . import config, herdr, labels, model, navigation, pi_bridge, translog, usage
 from . import store as store_mod
 
 ACTIONS = ("mark-reviewed", "mark-unread", "mark-all-reviewed", "reapply", "clear",
@@ -462,6 +462,16 @@ def set_view(store: store_mod.Store, attempts: int = 3) -> bool:
     return False
 
 
+def install_pi_bridge(store: store_mod.Store) -> None:
+    """Keep pi's copy of the bridge current; cheap when nothing changed."""
+    try:
+        result = pi_bridge.ensure(PLUGIN_ROOT)
+    except Exception as e:  # never let the bridge break a hook
+        result = "error: %r" % e
+    if result not in ("current", "no pi", "off"):
+        debug(store, "pi bridge: %s" % result)
+
+
 def on_event() -> int:
     pane, hint = parse_event(os.environ.get("HERDR_PLUGIN_EVENT_JSON"))
     hints = {pane: (hint,)} if pane and hint else {}
@@ -478,6 +488,7 @@ def on_event() -> int:
     ensure_ticker(store, st)
     if pending:
         debug(store, "event pane=%s hint=%s wrote %s" % (pane, hint, sorted(pending)))
+    install_pi_bridge(store)
     return 0
 
 
@@ -584,6 +595,7 @@ def on_startup() -> int:
     except store_mod.LockTimeout:
         pass
     set_view(store)
+    install_pi_bridge(store)
     if not handoff:
         spawn_reseed()
     elif st is not None:
@@ -766,6 +778,7 @@ def action(name: str) -> int:
         store.save_if_changed(st, before)
     ensure_ticker(store, st)
     if name == "reapply":
+        install_pi_bridge(store)
         ok = set_view(store)
         print("attention-queue: view %s" % ("applied" if ok else "not applied"))
         return 0 if ok else 1

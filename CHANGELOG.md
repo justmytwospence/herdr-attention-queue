@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.0
+
+- The pi bridge ships with the plugin (`pi/herdr-attention-bridge.ts`) and the
+  plugin installs it into pi's extensions directory on every server, keeping it
+  current; `{"pi_bridge": false}` removes it. Remove any copy installed by hand.
+  A second copy loaded beside it goes quiet.
+- `herdr:background` event-bus holds: any pi extension can report background
+  work that will wake the agent, beside the pi-subagents and
+  pi-background-tasks adapters.
+- Turns that end asking you something show blocked until your next prompt.
+  Jev judges the final message (`attention.py ask-check`); the pi bridge asks
+  after every turn, and Claude Code and Codex `Stop` hooks can call it. Needs
+  `TYPESAFE_API_KEY`.
+- `attention.py activity STATE` reports the `activity` token from any
+  harness's hooks.
+
 ## 0.12.0
 
 - `jump-attention` cycles through every blocked, working and waiting agent in

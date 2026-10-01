@@ -154,14 +154,79 @@ working, the ticker also watches it):
 "$HERDR_BIN_PATH" plugin action invoke attention-queue.refresh
 ```
 
-[justmytwospence/dotfiles](https://github.com/justmytwospence/dotfiles) wires
-the three harnesses it uses:
+The plugin ships what reports it for pi, Claude Code and Codex:
 
-| harness | how |
+### pi
+
+The plugin installs its pi bridge (`pi/herdr-attention-bridge.ts`) as
+`herdr-attention-queue.ts` in pi's extensions directory (`$PI_CODING_AGENT_DIR`,
+else `~/.pi/agent`) on every server it runs on, at startup, on `reapply` and on
+agent events, and keeps it current. Running pi sessions pick up an update with
+`/reload`. It never overwrites a file it did not write; `{"pi_bridge": false}`
+in `config.json` removes it. The bridge reports:
+
+- **blocked** for every extension dialog (pi's `ui_prompt_start`), so any pi
+  extension's questions count, and for any `herdr:blocked` hold;
+- **blocked** when a turn ends by asking you something (see below);
+- **working** while an extension holds `herdr:working`;
+- **waiting** (`bg`) for background work that will wake the agent.
+
+Any pi extension can use these event-bus conventions, each as
+`{active: true, label}` then `{active: false}`:
+
+| event | means |
 |---|---|
-| pi | `shell/.pi/agent/extensions/herdr-attention-bridge.ts`: blocked for every extension dialog (`ui_prompt_start`) and `herdr:blocked` hold; working while an extension holds `herdr:working` (pi-plan-mode's planner runs and replies, whose trace view is a progress view, not a question) |
-| Claude Code | `shell/.local/bin/herdr-activity` from hooks: blocked from `PreToolUse` to `PostToolUse` of `AskUserQuestion` and `ExitPlanMode`; cleared on prompt, stop and session start. Permission prompts are left to herdr's screen rules: no hook fires when one is answered, only when the tool finishes |
-| Codex | the same script: working on `UserPromptSubmit`, idle on `Stop`, cleared on session start. Approval prompts are left to herdr's screen rules, which win over the report |
+| `herdr:blocked` | waiting on the user (herdr's own pi integration counts these too) |
+| `herdr:working` | working outside the agent's turn; a dialog opened meanwhile is a progress view, not a question |
+| `herdr:background` | background work that will wake the agent |
+
+pi-plan-mode holds `herdr:blocked` for its dialogs and `herdr:working` while
+planners run or reply. Two adapters cover existing extensions: pi-subagents'
+own `herdr:busy`, and pi-background-tasks' running tasks with
+`triggerOnCompletion`. Without the plugin these events do nothing, and herdr's
+own pi integration still honours `herdr:blocked`.
+
+### Claude Code and Codex
+
+Hooks call the plugin's entrypoint (path: the plugin root from
+`herdr plugin list`):
+
+```sh
+python3 -B /path/to/herdr-attention-queue/attention.py activity blocked|working|idle|clear
+python3 -B /path/to/herdr-attention-queue/attention.py ask-check --report --else idle|clear
+```
+
+`ask-check` judges the turn's final message from the hook's JSON
+(`last_assistant_message`, or Claude's `transcript_path`) and reports blocked
+when it asks you something, otherwise the `--else` state, so one hook is the
+only writer at the end of a turn.
+
+| harness | hooks |
+|---|---|
+| Claude Code | `PreToolUse` of `AskUserQuestion`/`ExitPlanMode`: `activity blocked`; their `PostToolUse`/`PostToolUseFailure`, `UserPromptSubmit`, `SessionStart`, `SessionEnd`: `activity clear`; `Stop`: `ask-check --report --else clear` |
+| Codex | `UserPromptSubmit`: `activity working`; `Stop`: `ask-check --report --else idle`; `SessionStart`: `activity clear` |
+
+Permission and approval prompts are left to herdr's screen rules: no hook fires
+when one is answered, only when the tool finishes.
+
+### Turns that end with a question
+
+A turn ending "Want me to push?" leaves the agent waiting on you as much as an
+open dialog, though every harness calls it finished. The judge asks Jev
+(TypeSafe's System One model) whether the turn's final message asks you a
+question, or for a decision or go-ahead, as opposed to reporting results or
+making a conditional offer ("I can do X if you want"). If so, the agent shows
+blocked until your next prompt.
+
+It needs `TYPESAFE_API_KEY` in the agent's environment and is otherwise off.
+Each check is one request of about 1,000 tokens (about $0.00005) and 200-300
+ms, made after the turn ends. On 73 labelled turn endings from real sessions it
+caught every question at the default threshold, with 3 false positives (2 of
+them requests made earlier in the message). Tune it in `config.json`:
+
+```json
+{"ask_judge": true, "ask_threshold": 0.8, "ask_model": "jev-latest"}
+```
 
 ## Claude usage and session names
 
@@ -377,6 +442,7 @@ directory; it can also map machine labels to paths. The log is
 
 ```sh
 python3 -m unittest discover -s tests -t . -v
+node pi/test/check.mjs           # the pi bridge: type check and tests against installed pi
 # Opt-in: creates and deletes only a uniquely named, isolated Herdr test session.
 HERDR_NAVIGATION_LIVE=1 python3 -m unittest tests.test_navigation_live -v
 python3 scripts/verify.py        # read-only check against a live server
