@@ -82,6 +82,7 @@ def ensure(plugin_root: str) -> str:
         fd, tmp = tempfile.mkstemp(dir=directory, prefix=".herdr-attention-queue-", suffix=".tmp")
         with os.fdopen(fd, "w") as f:
             f.write(want)
+        os.chmod(tmp, 0o644)  # mkstemp makes it owner-only; match pi's other extensions
         os.replace(tmp, path)
     except OSError:
         return "write failed"

@@ -273,6 +273,22 @@ class ActivityTest(unittest.TestCase):
         rec = run([T("idle", 1, tokens={"activity": "blocked"}), T("idle", 1)])
         self.assertEqual(rec["attn"], "idle")
 
+    def test_a_turn_ending_in_a_question_then_answered_finishes_as_done(self):
+        # pi: the turn ends (herdr completion), the judge marks it a question,
+        # the user answers, and the next turn is an ordinary finished turn.
+        rec = run([("idle", 1), ("working", 2), T("idle", 3, completion_seq=3)], completions=True)
+        self.assertEqual(rec["attn"], "done")
+        rec = run([T("idle", 3, completion_seq=3, tokens={"activity": "blocked"})], rec=rec, completions=True)
+        self.assertEqual(rec["attn"], "blocked")
+        for steps in (
+            # herdr's working seen while the clear was still in flight
+            [T("working", 4, tokens={"activity": "blocked"}), T("working", 4), T("idle", 5, completion_seq=5)],
+            # the whole answer turn missed between two looks
+            [T("idle", 5, completion_seq=5)],
+        ):
+            with self.subTest(steps=len(steps)):
+                self.assertEqual(run(steps, rec=dict(rec), completions=True)["attn"], "done")
+
     def test_first_sight_with_a_reported_idle_is_not_done(self):
         rec = run([T("done", 4, tokens={"activity": "idle"})])
         self.assertEqual(rec["attn"], "idle")

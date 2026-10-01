@@ -36,6 +36,7 @@ class EnsureTest(unittest.TestCase):
         self.assertIn('const PLUGIN_ROOT = "%s";' % ROOT, content)
         self.assertNotIn(pi_bridge.PLACEHOLDER, content)
         self.assertEqual(pi_bridge.ensure(ROOT), "current")
+        self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o644)
 
     def test_updates_its_own_file_and_never_touches_a_foreign_one(self):
         os.makedirs(os.path.join(self.agent, "extensions"))
