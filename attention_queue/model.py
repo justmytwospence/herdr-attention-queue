@@ -20,6 +20,14 @@ Attention states, most urgent first:
   - herdr says idle, but the pane's `bg` token (reported by the agent, e.g. a
     pi extension) counts pending background work.
 
+An agent can also correct herdr's status with the pane's `activity` token,
+for states herdr cannot see: `blocked` while it waits on the user (a question
+herdr's screen rules do not know, or an agent without hook authority), and
+`working` while it works outside a turn (a plan-mode planner run started by a
+command). Blocked from either source wins; a reported `working` beats herdr's
+idle, done and waiting. The token only changes rendering and clears done: the
+completion logic keeps following herdr's own status.
+
 "done" is sticky. herdr's own `done` means "idle and not yet seen" and flips
 back to idle as soon as the pane is merely viewed. Here it holds until the agent
 works again (the user sent a prompt or answered) or the user marks it reviewed.
@@ -52,6 +60,9 @@ TOKEN_NAMES = ("attn", "attn_rank", "attn_ts", "attn_icon")
 ROW_TOKEN = "attn_row"
 # Pane token an agent reports with its count of pending background work.
 BG_TOKEN = "bg"
+# Pane token an agent reports with a state herdr cannot see: blocked or working.
+ACTIVITY_TOKEN = "activity"
+ACTIVITIES = ("blocked", "working")
 # Detection rules that mean "working, but only on background work".
 BACKGROUND_RULE_PREFIX = "background_"
 
@@ -98,6 +109,12 @@ def bg_count(tokens: Dict[str, str]) -> int:
         return 0
 
 
+def activity(tokens: Dict[str, str]) -> Optional[str]:
+    """The state the agent reported in its `activity` token, if it is one we know."""
+    value = str(tokens.get(ACTIVITY_TOKEN) or "").strip().lower()
+    return value if value in ACTIVITIES else None
+
+
 def session_key(ref) -> Optional[str]:
     """Durable key for an agent conversation, from herdr's agent_session."""
     if not isinstance(ref, dict):
@@ -118,15 +135,23 @@ def raw_status(status: str) -> str:
 
 
 def render(
-    sticky: bool, raw: str, prev_attn: Optional[str], background: bool = False, bg: int = 0
+    sticky: bool,
+    raw: str,
+    prev_attn: Optional[str],
+    background: bool = False,
+    bg: int = 0,
+    reported: Optional[str] = None,
 ) -> str:
     """The attention state, by the first rule that applies:
 
-    blocked; working on background work only -> waiting; working; idle with
-    background work pending -> waiting; an unacted completion -> done; idle.
+    blocked (herdr or reported); reported working; working on background work
+    only -> waiting; working; idle with background work pending -> waiting; an
+    unacted completion -> done; idle.
     """
-    if raw == "blocked":
+    if raw == "blocked" or reported == "blocked":
         return "blocked"
+    if reported == "working":
+        return "working"
     if raw == "working":
         return "waiting" if background else "working"
     if raw == "unknown":
@@ -140,7 +165,9 @@ def render(
 
 
 def _render_truth(sticky: bool, t: Truth, prev_attn: Optional[str]) -> str:
-    return render(sticky, raw_status(t.status), prev_attn, t.background, bg_count(t.tokens))
+    return render(
+        sticky, raw_status(t.status), prev_attn, t.background, bg_count(t.tokens), activity(t.tokens)
+    )
 
 
 def _finish(rec: dict, prev_attn: Optional[str], t: Truth, now_ns: int) -> dict:
@@ -165,7 +192,7 @@ def fresh_record(
     """
     raw = raw_status(t.status)
     use = durable is not None and (restoring or durable.get("closed_ns") is None)
-    if raw in BUSY:
+    if raw in BUSY or activity(t.tokens):
         sticky = False
     elif use:
         sticky = bool(durable.get("sticky"))
@@ -228,6 +255,12 @@ def step(
     if raw in BUSY:
         # The user acted, or the agent resumed on its own.
         new.update(base=raw, sticky=False, gap_from=None)
+    elif activity(t.tokens):
+        # Busy by the agent's own report while herdr sees idle or cannot tell.
+        # base keeps following herdr, so completions are judged on its status.
+        new.update(sticky=False, gap_from=None)
+        if raw == "idle":
+            new["base"] = "idle"
     elif raw == "idle":
         if now_ns >= rec.get("settle_until_ns", 0) and completions:
             # herdr counts blocked -> idle as a completion; here leaving blocked
@@ -263,7 +296,7 @@ def apply_ack(rec: dict, t: Truth, now_ns: int) -> dict:
 
 def apply_unread(rec: dict, t: Truth, now_ns: int) -> dict:
     """User put an idle agent back into the done group."""
-    if raw_status(t.status) in BUSY:
+    if raw_status(t.status) in BUSY or activity(t.tokens):
         return dict(rec)
     new = dict(rec, sticky=True, gap_from=None)
     return _finish(new, rec.get("attn"), t, now_ns)

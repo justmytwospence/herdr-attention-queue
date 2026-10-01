@@ -171,3 +171,34 @@ class TickerTest(HookTestCase):
         self.run_hook("ticker")  # returns at once: the lock is held
         self.fake.set_status("w1:p1", "idle")
         self.assertTrue(self.wait_for(lambda: not self.ticker_running()))
+
+
+class ActivityE2ETest(HookTestCase):
+    def test_planning_reported_while_idle_shows_working_after_refresh(self):
+        f = self.fake
+        f.add_agent("w1:p1", "idle", agent="pi", session="/tmp/p.jsonl", skipped=True)
+        self.event("w1:p1")
+        self.assertEqual(self.attn("w1:p1"), "idle")
+        # A token change emits no plugin event; the integration asks for a refresh.
+        f.set_token("w1:p1", "activity", "working")
+        self.run_hook("action", "refresh")
+        self.assertEqual(self.attn("w1:p1"), "working")
+        # The ticker watches the token, so its clearing shows without an event.
+        self.assertTrue(self.wait_for(self.ticker_running))
+        f.set_token("w1:p1", "activity", None)
+        self.assertTrue(self.wait_for(lambda: self.attn("w1:p1") == "idle"))
+        self.assertTrue(self.wait_for(lambda: not self.ticker_running()))
+        self.assertEqual(f.violations, [])
+
+    def test_question_under_a_spinner_is_blocked_without_any_event(self):
+        f = self.fake
+        f.add_agent("w1:p1", "working", agent="pi")
+        self.event("w1:p1")
+        self.assertTrue(self.wait_for(self.ticker_running))
+        f.set_token("w1:p1", "activity", "blocked")
+        self.assertTrue(self.wait_for(lambda: self.attn("w1:p1") == "blocked"))
+        f.set_token("w1:p1", "activity", None)
+        self.assertTrue(self.wait_for(lambda: self.attn("w1:p1") == "working"))
+        f.set_status("w1:p1", "idle")
+        self.assertTrue(self.wait_for(lambda: self.attn("w1:p1") == "done"))
+        self.assertEqual(f.violations, [])

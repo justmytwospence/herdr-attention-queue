@@ -73,6 +73,16 @@ description = "Set the attention-ordered Agents view and refresh every agent's t
 contexts = ["global"]
 command = ["python3", "-B", "attention.py", "action", "reapply"]
 
+# For agent integrations: run after changing a pane's `activity` or `bg` token,
+# which emits no plugin event. Without it the change shows on the next event or
+# ticker pass.
+[[actions]]
+id = "refresh"
+title = "Attention: refresh agent states"
+description = "Reconcile every agent's tokens now, e.g. after an integration changed its activity token."
+contexts = ["global"]
+command = ["python3", "-B", "attention.py", "action", "refresh"]
+
 # Run before disabling or uninstalling: tokens would otherwise linger on panes.
 [[actions]]
 id = "clear"

@@ -208,6 +208,70 @@ class WaitingTest(unittest.TestCase):
         self.assertEqual(run([T("idle", 2)], rec=rec)["attn"], "idle")
 
 
+class ActivityTest(unittest.TestCase):
+    """The agent's own `activity` token corrects what herdr cannot see."""
+
+    def test_parsing(self):
+        for value, parsed in [("blocked", "blocked"), (" Working ", "working"), ("idle", None), ("", None)]:
+            with self.subTest(value=value):
+                self.assertEqual(model.activity({"activity": value}), parsed)
+        self.assertIsNone(model.activity({}))
+
+    def test_question_herdr_reads_as_working_is_blocked(self):
+        # A screen-detected agent still shows its spinner under a question.
+        rec = run([("working", 1), T("working", 1, tokens={"activity": "blocked"})])
+        self.assertEqual(rec["attn"], "blocked")
+        rec = run([T("working", 1)], rec=rec)
+        self.assertEqual(rec["attn"], "working")
+        rec = run([("idle", 2)], rec=rec)
+        self.assertEqual(rec["attn"], "done")
+
+    def test_reported_blocked_beats_background_work_and_done(self):
+        rec = run([T("working", 1, tokens={"activity": "blocked"}, background=True)])
+        self.assertEqual(rec["attn"], "blocked")
+        rec = run([("working", 1), T("idle", 2, tokens={"activity": "blocked", "bg": "1"})])
+        self.assertEqual(rec["attn"], "blocked")
+
+    def test_planning_outside_a_turn_is_working_then_idle(self):
+        rec = run([("idle", 1), T("idle", 1, tokens={"activity": "working"})])
+        self.assertEqual(rec["attn"], "working")
+        self.assertEqual(run([("idle", 1)], rec=rec)["attn"], "idle")
+
+    def test_reported_working_clears_done(self):
+        rec = run([("working", 1), ("idle", 2)])
+        self.assertEqual(rec["attn"], "done")
+        rec = run([T("idle", 2, tokens={"activity": "working"})], rec=rec)
+        self.assertEqual(rec["attn"], "working")
+        self.assertEqual(run([("idle", 2)], rec=rec)["attn"], "idle")
+
+    def test_herdr_blocked_beats_reported_working(self):
+        rec = run([T("blocked", 1, tokens={"activity": "working"})])
+        self.assertEqual(rec["attn"], "blocked")
+
+    def test_reported_working_beats_waiting(self):
+        rec = run([T("working", 1, tokens={"activity": "working"}, background=True)])
+        self.assertEqual(rec["attn"], "working")
+        rec = run([T("idle", 1, tokens={"activity": "working", "bg": "2"})])
+        self.assertEqual(rec["attn"], "working")
+
+    def test_first_sight_with_activity_is_never_done(self):
+        rec = run([T("done", 3, tokens={"activity": "working"})])
+        self.assertFalse(rec["sticky"])
+        self.assertEqual(rec["attn"], "working")
+
+    def test_completions_still_follow_herdr(self):
+        rec = run(
+            [("working", 1), T("working", 1, tokens={"activity": "blocked"}), T("idle", 2, completion_seq=2)],
+            completions=True,
+        )
+        self.assertEqual(rec["attn"], "done")
+
+    def test_unread_while_reported_busy_is_a_no_op(self):
+        rec = run([T("idle", 1, tokens={"activity": "working"})])
+        rec = model.apply_unread(rec, T("idle", 1, tokens={"activity": "working"}), NOW + 5 * S)
+        self.assertFalse(rec["sticky"])
+
+
 class CompletionSeqTest(unittest.TestCase):
     """herdr 0.9.2+ reports completion_seq; it decides completions."""
 

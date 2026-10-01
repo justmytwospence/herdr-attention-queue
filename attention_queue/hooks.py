@@ -15,15 +15,16 @@ from . import config, herdr, labels, model, navigation, translog, usage
 from . import store as store_mod
 
 ACTIONS = ("mark-reviewed", "mark-unread", "mark-all-reviewed", "reapply", "clear",
-           "jump-attention")
+           "jump-attention", "refresh")
 # Tokens this plugin owns besides the attention ones.
 EXTRA_TOKEN_NAMES = ("usage", model.ROW_TOKEN)
 
 # Seconds between reseed passes after a server start; sums to 150.
 DEFAULT_RESEED_SCHEDULE = (1, 1, 1, 2, 2, 3, 5, 5, 10, 10, 10, 20, 20, 30, 30)
 SEEN_REFRESH_NS = 600 * 10**9
-# The ticker polls while any agent is working or waiting: background detection
-# rules, `bg` tokens and their expiry change without any plugin event.
+# The ticker polls while any agent is working or waiting, or reports an
+# `activity`: background detection rules, `bg` and `activity` tokens and their
+# expiry change without any plugin event.
 TICK_S = 3.0
 TICKER_IDLE_PASSES = 2
 TICKER_MAX_S = 3600
@@ -174,6 +175,7 @@ def reconcile(
             completions,
         )
         rec["background_seq"] = t.seq if t.background else None
+        rec["activity"] = model.activity(t.tokens)
         prev = (live.get(t.terminal_id) or {}).get("attn")
         if changes is not None and rec["attn"] != prev:
             changes.append((t, prev, rec))
@@ -309,7 +311,11 @@ def tick_s() -> float:
 
 
 def active(st: dict) -> bool:
-    return any(r.get("attn") in ACTIVE for r in st["live"].values())
+    """An agent is working or waiting, or holds an `activity` token.
+
+    Token changes and expiry emit no plugin event, so the ticker watches them.
+    """
+    return any(r.get("attn") in ACTIVE or r.get("activity") for r in st["live"].values())
 
 
 def ticker_lock_path(store: store_mod.Store) -> str:

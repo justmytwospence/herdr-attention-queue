@@ -5,7 +5,7 @@ attention queue:
 
 1. **blocked**: waiting on an approval or a question
 2. **done**: finished a turn you have not acted on yet
-3. **working**
+3. **working**: running a turn, or busy outside one (a plan-mode planner run)
 4. **waiting**: its turn is paused or over, but background work it started
    (subagents, background tasks) will wake it
 5. **idle**
@@ -110,6 +110,44 @@ number of pending tasks, with a TTL so a crashed agent cannot leave it behind:
 Clear it (or let it expire) at zero. Long tool calls inside a turn, such as
 sleeps or monitors, are working, not waiting.
 
+## Agent-reported state
+
+herdr's status comes from an agent's integration or from screen rules, and
+both miss things: a question drawn by an extension that no screen rule knows,
+an agent whose integration lost its hold on the pane (herdr then reads its
+spinner, which stays on screen under the question), or work that runs outside
+a turn, like a plan-mode planner run started by a command. Any harness can
+correct that with the pane token `activity`:
+
+| value | shows | while |
+|---|---|---|
+| `blocked` | blocked | the agent waits on the user |
+| `working` | working | the agent works although herdr sees it idle |
+
+Blocked from herdr or from the token wins over everything; a reported `working`
+beats herdr's idle, done and waiting. Either clears done, since the agent is
+busy again. Completions still follow herdr's own status. Report it with a TTL
+and refresh it, so a crashed agent cannot leave it behind; clear it when the
+state ends. A token change emits no plugin event, so ask for a refresh after
+each change (otherwise it shows on the next agent event):
+
+```sh
+"$HERDR_BIN_PATH" pane report-metadata "$HERDR_PANE_ID" \
+  --source user:my-bridge --token activity=blocked --ttl-ms 90000
+"$HERDR_BIN_PATH" plugin action invoke attention-queue.refresh
+```
+
+While any agent holds an `activity` token, the ticker watches it, so it clears
+on time without another refresh.
+
+For pi, the bridge in
+[justmytwospence/dotfiles](https://github.com/justmytwospence/dotfiles)
+(`shell/.pi/agent/extensions/herdr-attention-bridge.ts`) reports it: blocked for
+every extension dialog (`ui_prompt_start`) and `herdr:blocked` hold, working
+while an extension holds `herdr:working` on pi's event bus. A dialog opened
+during a `herdr:working` hold is a progress view, not a question; pi-plan-mode
+holds it while its planners run.
+
 ## Claude usage and session names
 
 Two extras, both on by default:
@@ -145,6 +183,7 @@ Turn either off in `config.json` in the plugin config directory
 | `attention-queue.mark-unread` | put the focused idle agent back into done |
 | `attention-queue.mark-all-reviewed` | clear done on every agent on this server |
 | `attention-queue.reapply` | set the Agents view and refresh every agent's tokens |
+| `attention-queue.refresh` | reconcile every agent now, after an integration changed `activity` or `bg` |
 | `attention-queue.clear` | remove the plugin's tokens and view (run before uninstalling) |
 
 ### Attention navigation
@@ -283,6 +322,8 @@ directory; it can also map machine labels to paths. The log is
 - Waiting covers background work that will wake the agent. Claude background
   shell tasks have no background detection rule and show working or idle, as
   do agents that report state without a `bg` token.
+- A screen-detected agent's question shows blocked only if a herdr screen rule
+  knows it, or the agent reports `activity`.
 - The notifier's key jump can land in a herdr popup if one is open.
 
 ## Development
