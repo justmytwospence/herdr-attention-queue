@@ -15,7 +15,7 @@ from . import config, herdr, labels, model, navigation, translog, usage
 from . import store as store_mod
 
 ACTIONS = ("mark-reviewed", "mark-unread", "mark-all-reviewed", "reapply", "clear",
-           "next-attention", "previous-attention")
+           "jump-attention")
 # Tokens this plugin owns besides the attention ones.
 EXTRA_TOKEN_NAMES = ("usage", model.ROW_TOKEN)
 
@@ -591,11 +591,11 @@ def navigation_snapshot(store):
     return agents, st["live"]
 
 
-def navigate(store, direction):
+def jump_attention(store):
     anchor = navigation_anchor()
     for attempt in range(2):
         agents, live = navigation_snapshot(store)
-        target = navigation.select(agents, live, anchor, direction)
+        target = navigation.select(agents, live)
         if target is None:
             message = "No agents need attention on this server"
             print("attention-queue: " + message)
@@ -608,11 +608,11 @@ def navigate(store, direction):
         # A fresh reconciled read catches a moved/replaced/closed agent and
         # changes to rendered eligibility. No focus RPC holds the state lock.
         current, live = navigation_snapshot(store)
-        found = next((t for t in current if t.pane_id == target.pane_id), None)
+        found = navigation.select(current, live)
         if found is None or navigation.signature(found, live) != expected:
-            continue
+            continue  # Also catches a newly arrived higher-priority agent.
         if target.pane_id == anchor:
-            return 0  # The anchor is the sole eligible agent.
+            return 0  # Stay at the head until acted on, even with other work.
         try:
             herdr.call("agent.focus", {"target": target.pane_id})
             return 0
@@ -631,8 +631,8 @@ def navigate(store, direction):
 
 def action(name: str) -> int:
     store = open_store()
-    if name in ("next-attention", "previous-attention"):
-        return navigate(store, 1 if name == "next-attention" else -1)
+    if name == "jump-attention":
+        return jump_attention(store)
     if name == "clear":
         return clear(store)
     with store.locked(LOCK_TIMEOUT_S):

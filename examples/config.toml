@@ -41,19 +41,13 @@ prefix = "ctrl+b"
 # sends this key to switch the client to another machine on a click.
 focus_agent = "prefix+alt+1..9"
 
-# Ctrl-b Ctrl-n/p: actionable agents on the selected server.
-# Navigation does not acknowledge; native indexed focus above spans machines.
+# Ctrl-b Enter: highest-priority actionable agent on the selected server.
+# Stay until acted on; focus never acknowledges. Indexed focus spans machines.
 [[keys.command]]
-key = "prefix+ctrl+n"
+key = "prefix+enter"
 type = "plugin_action"
-command = "attention-queue.next-attention"
-description = "attention: next actionable agent (this server)"
-
-[[keys.command]]
-key = "prefix+ctrl+p"
-type = "plugin_action"
-command = "attention-queue.previous-attention"
-description = "attention: previous actionable agent (this server)"
+command = "attention-queue.jump-attention"
+description = "attention: highest-priority agent (this server)"
 
 # Actions run against the focused pane. Carry the same bindings in the config of
 # every herdr server you connect to as a machine.

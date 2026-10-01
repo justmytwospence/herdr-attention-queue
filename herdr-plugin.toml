@@ -1,6 +1,6 @@
 id = "attention-queue"
 name = "Attention Queue"
-version = "0.5.0"
+version = "0.6.0"
 # 0.9.1: the selected machine's view orders every machine's agents together.
 min_herdr_version = "0.9.1"
 description = "Sticky done-until-you-act agent state with waiting for background work, an attention-ordered Agents view across machines, state icons, Claude usage on every row, and a macOS notifier."
@@ -38,18 +38,11 @@ on = "pane.focused"
 command = ["python3", "-B", "attention.py", "focus"]
 
 [[actions]]
-id = "next-attention"
-title = "Attention: next actionable agent"
-description = "Traverse blocked and sticky-done agents on this server, without acknowledging."
+id = "jump-attention"
+title = "Attention: jump to highest-priority agent"
+description = "Focus the oldest blocked agent, otherwise oldest sticky done, on this server. Stay there until acted on; never acknowledge just by focusing."
 contexts = ["global"]
-command = ["python3", "-B", "attention.py", "action", "next-attention"]
-
-[[actions]]
-id = "previous-attention"
-title = "Attention: previous actionable agent"
-description = "Traverse the attention queue in reverse on this server, without acknowledging."
-contexts = ["global"]
-command = ["python3", "-B", "attention.py", "action", "previous-attention"]
+command = ["python3", "-B", "attention.py", "action", "jump-attention"]
 
 [[actions]]
 id = "mark-reviewed"

@@ -11,12 +11,10 @@ def candidates(agents, live):
     ))
 
 
-def select(agents, live, anchor, direction):
+def select(agents, live):
+    """Highest-priority actionable obligation, independent of the caller."""
     queue = candidates(agents, live)
-    if not queue:
-        return None
-    index = next((i for i, t in enumerate(queue) if t.pane_id == anchor), None)
-    return queue[0] if index is None else queue[(index + direction) % len(queue)]
+    return queue[0] if queue else None
 
 
 def signature(t, live):

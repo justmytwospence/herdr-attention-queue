@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0
+
+- Replace `next-attention` / `previous-attention` traversal with a single
+  `jump-attention` action: always focus the highest-priority blocked/sticky-done
+  obligation. Stay at the head until the agent is acted on; focus never reviews.
+- Revalidation also catches newly arrived higher-priority candidates.
+- Example binding is Ctrl-b Enter. Update existing traversal bindings when upgrading;
+  the old action IDs are removed. State format and acknowledgement are unchanged.
+
 ## 0.5.0
 
 - `next-attention` / `previous-attention` actions traverse blocked and sticky-done
