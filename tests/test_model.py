@@ -410,16 +410,16 @@ class TokenTest(unittest.TestCase):
         tabs = {"w2:t1": "navigation", "w2:t2": "attention queue", "w3:t1": "main", "w4:t1": "1"}
         self.assertEqual(model.places(agents, workspaces, tabs), {
             "w1:p1": "solo",
-            "w2:p1": "homelab > navigation",
-            "w2:p2": "homelab > attention queue",
-            "w3:p1": "split > main > claude",
-            "w3:p2": "split > main > pi",
-            "w4:p1": "twins > 1 > pi p1",
-            "w4:p2": "twins > 1 > pi p2",
+            "w2:p1": "homelab › navigation",
+            "w2:p2": "homelab › attention queue",
+            "w3:p1": "split › main › claude",
+            "w3:p2": "split › main › pi",
+            "w4:p1": "twins › 1 › pi p1",
+            "w4:p2": "twins › 1 › pi p2",
             "w5:p1": None,
         })
         # Without tab labels, the agent kind tells them apart.
-        self.assertEqual(model.places(agents[1:3], workspaces, {})["w2:p1"], "homelab > pi p1")
+        self.assertEqual(model.places(agents[1:3], workspaces, {})["w2:p1"], "homelab › pi p1")
 
     def test_row_text(self):
         self.assertEqual(model.row_text("done", "data-pipeline"), model.ICON["done"] + "  data-pipeline")

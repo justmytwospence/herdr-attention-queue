@@ -322,7 +322,7 @@ def row_text(attn: str, place: Optional[str]) -> str:
     return icon + ROW_GAP + place if place else icon
 
 
-PLACE_SEP = " > "
+PLACE_SEP = " › "  # single right-pointing angle quotation mark
 
 
 def places(
@@ -331,8 +331,8 @@ def places(
     """{pane_id: where the agent is}, as short as tells agents apart.
 
     The workspace label alone; with several agents in the workspace, then its
-    tab (`homelab > navigation`); with several in that tab, then the agent kind
-    (`homelab > navigation > claude`), and its pane when even that repeats.
+    tab (`homelab › navigation`); with several in that tab, then the agent kind
+    (`homelab › navigation › claude`), and its pane when even that repeats.
     """
     tabs = tabs or {}
     result: Dict[str, Optional[str]] = {}

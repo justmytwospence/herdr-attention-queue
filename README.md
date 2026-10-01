@@ -77,9 +77,9 @@ Tokens reported on each agent pane (source `plugin:attention-queue`):
 
 The place in `attn_row` is the workspace label, made only as long as it needs
 to be to tell agents apart: with several agents in a workspace it adds the tab
-(`homelab > navigation`, `homelab > attention queue`); with several in one tab,
-the agent kind (`homelab > main > claude`), then the pane when that repeats too
-(`homelab > main > pi p2`). The notifier titles use the same place.
+(`homelab › navigation`, `homelab › attention queue`); with several in one tab,
+the agent kind (`homelab › main › claude`), then the pane when that repeats too
+(`homelab › main › pi p2`). The notifier titles use the same place.
 
 | state | icon | glyph |
 |---|---|---|

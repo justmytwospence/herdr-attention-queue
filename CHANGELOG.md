@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1
+
+- Places use ` › ` between parts (`homelab › navigation`) instead of ` > `.
+
 ## 0.8.0
 
 - `usage` names its window with a leading icon (clock: 5-hour block, calendar:
