@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.0
+
+- `jump-attention` follows the Agents panel's order and cycles: from outside
+  the most urgent tier (blocked, else done) it goes to the tier's first row;
+  from a row of the tier, to the next one, wrapping. A lone tier row stays.
+- Much faster. The action only appends a `jump` line; the notifier does the
+  jump over the ssh pipes it already holds. `follow` now answers `list`,
+  `focus` and `notice` commands on its input (milliseconds, where each
+  `herdr --machine` call opened a new ssh connection), and polls the log every
+  50 ms instead of 250 ms. The Ghostty keystroke tries the frontmost terminal
+  first. Restart the notifier after updating.
+
 ## 0.10.0
 
 - `jump-attention` spans machines also while the client shows a remote one.

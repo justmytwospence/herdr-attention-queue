@@ -11,10 +11,31 @@ def candidates(agents, live):
     ))
 
 
-def select(agents, live):
-    """Highest-priority actionable obligation, independent of the caller."""
+def cycle(rows, here):
+    """Index of the row to jump to, or None when nothing needs attention.
+
+    `rows` are (key, attn) in the Agents panel's visual order; `here` is the
+    current agent's key. The most urgent state present (blocked, else done)
+    forms the tier. Outside the tier, go to its first row; on a row of the
+    tier, go to the next one, wrapping. A lone tier row that is `here` is
+    returned as is: stay.
+    """
+    states = {attn for _, attn in rows}
+    tier = next((s for s in ("blocked", "done") if s in states), None)
+    if tier is None:
+        return None
+    tied = [i for i, (_, attn) in enumerate(rows) if attn == tier]
+    keys = [rows[i][0] for i in tied]
+    if here in keys:
+        return tied[(keys.index(here) + 1) % len(tied)]
+    return tied[0]
+
+
+def select(agents, live, here=None):
+    """The agent to jump to from pane `here`, independent of server-wide focus."""
     queue = candidates(agents, live)
-    return queue[0] if queue else None
+    index = cycle([(t.pane_id, live[t.terminal_id]["attn"]) for t in queue], here)
+    return None if index is None else queue[index]
 
 
 def signature(t, live):
@@ -23,36 +44,3 @@ def signature(t, live):
     return (t.terminal_id, t.agent, t.session, t.pane_id, t.workspace_id,
             t.tab_id, t.seq, rec["attn"], rec["attn_ns"])
 
-
-def _remote_ms(agent: dict):
-    try:
-        return int((agent.get("tokens") or {}).get("attn_ts") or "")
-    except ValueError:
-        return None
-
-
-def select_across(agents, live, remotes):
-    """Highest-priority obligation across this server and the saved machines.
-
-    `remotes` is [(machine key, raw agent.list dicts or None)] in the client's
-    machine order after this one; their attention comes from the tokens their
-    own plugin wrote. Returns (None, Truth) for a local agent, (machine key,
-    pane id) for a remote one, or None. Blocked first, then sticky done; oldest
-    state-entry millisecond first; ties keep machine order, then list order.
-    """
-    rows = []
-    local = candidates(agents, live)
-    if local:
-        t = local[0]
-        rec = live[t.terminal_id]
-        rows.append(((0 if rec["attn"] == "blocked" else 1, rec["attn_ns"] // 10**6, 0, 0), (None, t)))
-    for m_index, (key, remote_agents) in enumerate(remotes or (), start=1):
-        for a_index, agent in enumerate(remote_agents or ()):
-            attn = (agent.get("tokens") or {}).get("attn")
-            ms = _remote_ms(agent)
-            if attn not in ("blocked", "done") or ms is None or not isinstance(agent.get("pane_id"), str):
-                continue
-            rows.append(((0 if attn == "blocked" else 1, ms, m_index, a_index), (key, agent["pane_id"])))
-    if not rows:
-        return None
-    return min(rows, key=lambda row: row[0])[1]

@@ -204,7 +204,7 @@ Turn either off in `config.json` in the plugin config directory
 
 | action | does |
 |---|---|
-| `attention-queue.jump-attention` | focus the highest-priority blocked/sticky-done agent on any connected machine |
+| `attention-queue.jump-attention` | focus the next most urgent agent, in panel order, on any connected machine |
 | `attention-queue.mark-reviewed` | clear done on the focused agent |
 | `attention-queue.mark-unread` | put the focused idle agent back into done |
 | `attention-queue.mark-all-reviewed` | clear done on every agent on this server |
@@ -214,44 +214,41 @@ Turn either off in `config.json` in the plugin config directory
 
 ### Attention navigation
 
-The example binds **Ctrl-b Enter**. This is priority selection, not traversal:
-always select the highest-priority rendered `blocked`, otherwise sticky `done`,
-oldest state-entry millisecond first, with layout order breaking ties. If the
-current agent is already highest priority, stay there even when other work exists.
-Responding removes a blocked obligation; explicitly reviewing clears sticky done.
-Repeated presses never cycle, skip the head, or implicitly consume work.
-Empty queues show a best-effort notice.
-Working, waiting, idle and rendered unknown are excluded; detection flaps retain
-the model's existing state. Focus targets the exact agent's workspace/tab/pane,
-including zoomed tabs, without acknowledging its work.
-**Viewing never clears sticky done**; use `Ctrl-b a` to mark it reviewed.
+The example binds **Ctrl-b Enter**. It jumps to the most urgent agents in the
+Agents panel's order, across every connected machine:
 
-The invocation's pane (or plugin context), not another client's server-wide
-focus, determines whether the caller is already at the head. Identity, eligibility
-and highest-priority position are reread before focus; churn permits one reselection. Ambiguous focus timeouts are not retried. No durable cursor,
-state format change, view filtering or acknowledgement is introduced.
+- The tier is every `blocked` agent, or every sticky `done` one when nothing is
+  blocked. Working, waiting, idle and unknown agents are never targets.
+- From outside the tier, go to its first row in the panel.
+- From an agent of the tier, go to the next one in panel order, wrapping around
+  after the last. The only agent of its tier stays put.
+- Nothing needing attention shows a notice.
 
-The jump spans **every connected machine**, like the sidebar's combined list. A
-remote agent's state comes from the tokens its own server's plugin wrote (read
-with `herdr --machine <id> agent list`, in parallel); an unreachable machine is
-skipped. The remote agent is focused on its server, and since herdr has no API to
-switch a client to another machine, the client is switched the way the notifier
-does it: Ghostty sends the `focus_agent` key (prefix, then alt+N) for the agent's
-position N in the combined list. That needs macOS, Ghostty, `window_title`
-starting with `herdr `, `focus_agent = "prefix+alt+1..9"` and `prefix_csi` if
-the prefix is not ctrl+b (see Notifications). Otherwise, or above position 9, a
-notice names the machine and agent.
+Responding removes a blocked agent from the tier; marking it reviewed (`Ctrl-b
+a`) removes a done one. **Focusing never reviews.** Focus reaches the exact
+pane, including zoomed tabs. The current agent is the pane the action ran from,
+never another client's focus.
 
-Plugin actions run on the server the client shows, and only the client's own
-host has saved machines. When the client shows a remote machine, the action
-there cannot see the others, so it hands the jump to the notifier on the
-client's host: it appends a `jump` line to its transition log, which the
-notifier already follows over ssh, and the notifier jumps across machines the
-same way (focus on the agent's server, then the `focus_agent` key). The action
-hands over only while a notifier is reading its log (`follow` keeps
-`follower.alive` in the session state directory fresh); without one, it jumps
-on that machine alone. Requests older than 10 seconds are dropped, so a
-reconnecting notifier never replays one.
+The jump runs in the notifier (see Notifications), which already holds an ssh
+pipe to every machine's `follow`:
+
+1. The action, on whichever server the client shows, appends a `jump` line to
+   its transition log and exits. It does no herdr calls.
+2. The notifier asks every machine for its agents over its pipe (a few
+   milliseconds each) and rebuilds the combined panel order from the plugin's
+   tokens, as the client does.
+3. A target on the machine the client shows is focused over that machine's
+   pipe. A target on another machine needs the client to switch, which herdr
+   has no API for, so Ghostty sends the `focus_agent` key (prefix, then alt+N)
+   for its row N. That needs macOS, Ghostty, `window_title` starting with
+   `herdr `, `focus_agent = "prefix+alt+1..9"` and `prefix_csi` if the prefix is
+   not ctrl+b. Above row 9 the agent is focused on its server and a notice
+   names it.
+
+The action hands over only while a notifier reads its log (`follow` keeps
+`follower.alive` in the session state directory fresh). Without one it cycles
+among that server's agents alone. Requests older than 10 seconds are dropped,
+so a reconnecting notifier never replays one.
 
 ## Multiple machines
 

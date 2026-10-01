@@ -87,6 +87,33 @@ class FollowTest(unittest.TestCase):
         translog.append(self.dir, [{"ts_ms": 7}])
         self.assertTrue(self.wait(lambda: [x["ts_ms"] for x in self.seen(out)] == [7]))
 
+    def test_commands_on_input_are_answered_between_log_lines(self):
+        r, w = os.pipe()
+        out = io.StringIO()
+        done = threading.Event()
+        self.addCleanup(done.set)
+        seen = []
+
+        def on_command(command):
+            seen.append(command)
+            return None if command.get("op") == "quiet" else {"kind": "pong", "req": command.get("req")}
+
+        threading.Thread(
+            target=translog.follow, args=(self.dir, 0),
+            kwargs={"out": out, "poll_s": 0.01, "stop": done.is_set, "heartbeat_s": 0,
+                    "commands": os.fdopen(r, "rb"), "on_command": on_command},
+            daemon=True,
+        ).start()
+        os.write(w, b'{"op":"ping","req":"r1"}\nnot json\n{"op":"quiet"}\n{"op":"pi')
+        os.write(w, b'ng","req":"r2"}\n')
+        self.assertTrue(self.wait(lambda: [x.get("req") for x in self.seen(out)] == ["r1", "r2"]))
+        self.assertEqual(len(seen), 3)
+        translog.append(self.dir, [{"ts_ms": 9}])
+        self.assertTrue(self.wait(lambda: any(x.get("ts_ms") == 9 for x in self.seen(out))))
+        os.close(w)  # input closed: keep following the log
+        translog.append(self.dir, [{"ts_ms": 10}])
+        self.assertTrue(self.wait(lambda: any(x.get("ts_ms") == 10 for x in self.seen(out))))
+
     def test_follow_marks_the_log_as_read(self):
         self.assertFalse(translog.follower_alive(self.dir))
         self.start(since_ms=0)
@@ -155,7 +182,7 @@ class HookLogTest(HookTestCase):
         )
         self.addCleanup(proc.stdout.close)
         self.addCleanup(proc.wait)
-        self.addCleanup(proc.kill)
+        self.addCleanup(lambda: (proc.kill(), proc.communicate()))
         first = json.loads(proc.stdout.readline())
         self.assertEqual((first["pane_id"], first["attn"]), ("w1:p1", "working"))
 
@@ -169,3 +196,30 @@ class HookLogTest(HookTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FollowEntrypointTest(HookTestCase):
+    def test_follow_serves_list_focus_and_notice_over_its_pipe(self):
+        import subprocess
+
+        self.fake.add_agent("w1:p1", "done", session="a")
+        self.fake.add_agent("w1:p2", "idle", session="b")
+        self.run_hook("event", event=self.status_event("w1:p1"))
+        proc = subprocess.Popen(
+            self.argv("follow", "--session", "default", "--since-ms", "9999999999999"),
+            env=self.env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1,
+        )
+        self.addCleanup(lambda: (proc.kill(), proc.communicate()))
+        replies = {}
+        for command in ({"op": "list", "req": "r1"}, {"op": "focus", "req": "r2", "pane_id": "w1:p2"},
+                        {"op": "notice", "req": "r3", "text": "hi"}, {"op": "focus", "req": "r4", "pane_id": "nope"}):
+            proc.stdin.write(json.dumps(command) + "\n")
+            proc.stdin.flush()
+            reply = json.loads(proc.stdout.readline())
+            replies[reply["req"]] = reply
+        listed = {a["pane_id"]: a["tokens"]["attn"] for a in replies["r1"]["agents"]}
+        self.assertEqual(listed, {"w1:p1": "done", "w1:p2": "idle"})
+        self.assertEqual(replies["r2"]["ok"], True)
+        self.assertEqual(self.fake.focus[-1], "w1:p2")
+        self.assertEqual(replies["r3"]["ok"], True)
+        self.assertEqual(replies["r4"]["kind"], "error")

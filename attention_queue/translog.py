@@ -21,10 +21,17 @@ Line kinds:
           the invoking pane.
   ping   {"v", "kind": "ping", "ts_ms"}: written by `follow` (not the log) every
           30 s, so both ends of an ssh pipe notice when the other is gone.
+
+`follow` also reads commands, one JSON object per line, on its input (the
+notifier's end of the ssh pipe) and writes each reply into its output between
+log lines. That keeps the notifier's requests to a server on the connection it
+already holds: milliseconds, where a new `herdr --machine` call takes an ssh
+round trip and a process start.
 """
 
 import json
 import os
+import select
 import sys
 import time
 from typing import IO, Callable, Iterable, Optional
@@ -89,11 +96,17 @@ def follow(
     session_dir: str,
     since_ms: int,
     out: IO[str] = sys.stdout,
-    poll_s: float = 0.25,
+    poll_s: float = 0.05,
     stop: Optional[Callable[[], bool]] = None,
     heartbeat_s: float = HEARTBEAT_S,
+    commands: Optional[IO] = None,
+    on_command: Optional[Callable[[dict], Optional[dict]]] = None,
 ) -> int:
-    """Print log lines newer than since_ms, then follow the log until stop()."""
+    """Print log lines newer than since_ms, then follow the log until stop().
+
+    With `commands` and `on_command`, each JSON line read from `commands` is
+    passed to on_command, and its reply (if any) is written to `out`.
+    """
     target = path(session_dir)
     stop = stop or (lambda: False)
     last_write = [time.monotonic()]
@@ -104,6 +117,47 @@ def follow(
         if time.monotonic() - last_touch[0] >= ALIVE_TOUCH_S:
             touch_alive(session_dir)
             last_touch[0] = time.monotonic()
+
+    source = [commands if commands is not None and on_command is not None else None]
+    pending = [b""]
+
+    def wait() -> None:
+        """Sleep poll_s, serving commands as they arrive."""
+        if source[0] is None:
+            time.sleep(poll_s)
+            return
+        try:
+            ready, _, _ = select.select([source[0]], [], [], poll_s)
+        except (OSError, ValueError):
+            source[0] = None
+            return
+        if not ready:
+            return
+        try:
+            chunk = os.read(source[0].fileno(), 65536)
+        except OSError:
+            chunk = b""
+        if not chunk:
+            # The other end closed its input (or it was /dev/null): poll only.
+            source[0] = None
+            return
+        pending[0] += chunk
+        while b"\n" in pending[0]:
+            raw, pending[0] = pending[0].split(b"\n", 1)
+            try:
+                command = json.loads(raw.decode())
+            except ValueError:
+                continue
+            if not isinstance(command, dict):
+                continue
+            try:
+                reply = on_command(command)
+            except Exception as e:  # a bad command must not end the follow
+                reply = {"v": VERSION, "kind": "error", "req": command.get("req"), "error": repr(e)}
+            if reply is not None:
+                out.write(json.dumps(reply, sort_keys=True, separators=(",", ":")) + "\n")
+                out.flush()
+                last_write[0] = time.monotonic()
 
     def heartbeat() -> None:
         if heartbeat_s and time.monotonic() - last_write[0] >= heartbeat_s:
@@ -135,7 +189,7 @@ def follow(
             except OSError:
                 heartbeat()
                 alive()
-                time.sleep(poll_s)
+                wait()
                 continue
             partial = ""
         chunk = fh.readline()
@@ -159,7 +213,7 @@ def follow(
             continue
         heartbeat()
         alive()
-        time.sleep(poll_s)
+        wait()
     if fh is not None:
         fh.close()
     return 0

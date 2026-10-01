@@ -28,7 +28,7 @@ import threading
 import time
 from typing import Dict, List, NamedTuple, Optional, Sequence
 
-from . import config, herdr, store as store_mod
+from . import config, herdr, navigation, store as store_mod
 
 LOCAL = "local"
 NOTIFY_STATES = ("blocked", "done")
@@ -40,6 +40,8 @@ BACKOFF_MAX_S = 120.0
 STALE_S = 95.0
 HERDR_TITLE_PREFIX = "herdr "
 JUMP_MAX = 9
+# Lines from the transition log itself; the rest are replies on the channel.
+LOG_KINDS = ("attn", "focus", "jump")
 SSH_OPTIONS = (
     "-T",
     "-o", "BatchMode=yes",
@@ -195,31 +197,30 @@ def jump_index(lists: Sequence, machine_key: str, pane_id: str) -> Optional[int]
     return None
 
 
-JUMP_STATES = ("blocked", "done")
 # A jump request is acted on only this soon after it was made: the user is
 # waiting, and a late one (a reconnect replaying the log) would surprise them.
 JUMP_MAX_AGE_MS = 10_000
+# How long a jump waits for fresh agent lists before using the last ones.
+LIST_WAIT_S = 0.3
+# Lists older than this are not trusted for a jump.
+LIST_MAX_AGE_S = 120.0
 
 
-def jump_target(lists: Sequence):
-    """(machine key, pane id, 1-based row) of the highest-priority agent, or None.
+def panel_rows(lists: Sequence):
+    """[(machine key, pane id, attn)] in the client's combined Agents list order.
 
-    Rows sort like the client's combined Agents list (see jump_index); the
-    target is the first blocked or done one, which is the list's head when
-    anything needs attention.
+    Same order as jump_index: the plugin view's tokens, then machine order, then
+    each server's layout order. Row i is focus_agent position i + 1.
     """
     rows = []
     for m_index, (key, agents) in enumerate(lists):
         if agents is None:
             continue
         for a_index, agent in enumerate(agents):
-            rows.append((_attn_key(agent), m_index, a_index, key, agent))
+            if isinstance(agent.get("pane_id"), str):
+                rows.append((_attn_key(agent), m_index, a_index, key, agent))
     rows.sort(key=lambda row: row[:3])
-    for index, row in enumerate(rows):
-        agent = row[4]
-        if (agent.get("tokens") or {}).get("attn") in JUMP_STATES and isinstance(agent.get("pane_id"), str):
-            return row[3], agent["pane_id"], index + 1
-    return None
+    return [(row[3], row[4]["pane_id"], (row[4].get("tokens") or {}).get("attn")) for row in rows]
 
 
 def looking_at(front_title: Optional[str], selected: str, focused: Optional[str], machine_key: str, pane_id: str) -> bool:
@@ -293,6 +294,15 @@ def jump_script(n: int, prefix_sequence: str = PREFIX_SEQUENCE, prefix: str = HE
     first, second = jump_sequences(n, prefix_sequence)
     return """
 tell application "Ghostty"
+    try
+        set s to focused terminal of selected tab of front window
+        if name of s starts with %(prefix)s then
+            perform action %(first)s on s
+            delay 0.02
+            perform action %(second)s on s
+            return "sent"
+        end if
+    end try
     repeat with w in windows
         repeat with t in tabs of w
             repeat with s in terminals of t
@@ -447,6 +457,11 @@ class Notifier:
         self.log = log or (lambda message: None)
         self.lock = threading.Lock()
         self.click_lock = threading.Lock()
+        # Each machine's channel (its follow pipe) and last agent list.
+        self.channels: Dict[str, "Source"] = {}
+        self.lists: Dict[str, tuple] = {}  # key -> (monotonic time, req, agents)
+        self.lists_changed = threading.Condition(self.lock)
+        self.next_req = 0
 
     def set_machines(self, machines: Sequence[Machine]) -> None:
         with self.lock:
@@ -455,6 +470,13 @@ class Notifier:
 
     def handle(self, machine_key: str, line: dict) -> Optional[str]:
         machine = self.machines.get(machine_key)
+        if machine is not None and line.get("kind") == "list":
+            agents = line.get("agents")
+            if isinstance(agents, list):
+                with self.lists_changed:
+                    self.lists[machine_key] = (time.monotonic(), line.get("req"), agents)
+                    self.lists_changed.notify_all()
+            return "list"
         pane = line.get("pane_id")
         if machine is None or not isinstance(pane, str):
             return None
@@ -547,45 +569,82 @@ class Notifier:
                     return
             self.log("machine switch to %s not confirmed" % machine.key)
 
-    def agent_lists(self) -> List:
-        """[(machine key, agents or None)] in the client's machine order, fetched in parallel."""
+    def command(self, key: str, command: dict) -> bool:
+        """Send a command over a machine's follow channel; False when not connected."""
+        channel = self.channels.get(key)
+        return channel is not None and channel.send(command)
+
+    def fresh_lists(self, wait_s: float = LIST_WAIT_S) -> List:
+        """[(machine key, agents or None)] in machine order, as fresh as wait_s allows.
+
+        Asks every machine over its channel and waits for the replies; a machine
+        that does not answer in time keeps its last list, or is fetched directly
+        when there is none.
+        """
         with self.lock:
             machines = [self.machines[k] for k in self.order if k in self.machines]
-        results: Dict[str, Optional[List[dict]]] = {}
+            self.next_req += 1
+            req = "jump-%d" % self.next_req
+        asked = {m.key for m in machines if self.command(m.key, {"op": "list", "req": req})}
+        deadline = time.monotonic() + wait_s
+        with self.lists_changed:
+            while True:
+                missing = [k for k in asked if (self.lists.get(k) or (0, None))[1] != req]
+                left = deadline - time.monotonic()
+                if not missing or left <= 0:
+                    break
+                self.lists_changed.wait(left)
+            cached = dict(self.lists)
+        result = []
+        now = time.monotonic()
+        for m in machines:
+            entry = cached.get(m.key)
+            if entry is not None and now - entry[0] <= LIST_MAX_AGE_S:
+                result.append((m.key, entry[2]))
+            elif m.key in asked:
+                result.append((m.key, None))  # connected but silent: skip it
+            else:
+                result.append((m.key, self.io.agents(m)))
+        return result
 
-        def fetch(machine: Machine) -> None:
-            results[machine.key] = self.io.agents(machine)
+    def focus(self, machine: Machine, pane_id: str) -> None:
+        if not self.command(machine.key, {"op": "focus", "pane_id": pane_id}):
+            self.io.focus_agent(machine, pane_id)
 
-        threads = [threading.Thread(target=fetch, args=(m,), daemon=True) for m in machines]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(15)
-        return [(m.key, results.get(m.key)) for m in machines]
+    def notice(self, machine: Machine, text: str) -> None:
+        if not self.command(machine.key, {"op": "notice", "text": text}):
+            self.io.notice(machine, text)
 
     def jump_request(self, origin: Machine, line: dict) -> None:
-        """jump-attention ran on `origin`, which cannot see the other machines."""
+        """jump-attention ran on `origin`, the machine the client shows.
+
+        Cycle through the most urgent state's agents in the Agents panel's
+        order across every machine. A target on `origin` is focused on that
+        server; one elsewhere needs the client to switch machines, which only
+        the focus_agent key can do.
+        """
         with self.click_lock:
-            target = jump_target(self.agent_lists())
-            if target is None:
-                self.io.notice(origin, "No agents need attention")
+            started = time.monotonic()
+            rows = panel_rows(self.fresh_lists())
+            here = (origin.key, line.get("pane_id"))
+            index = navigation.cycle([((k, p), a) for k, p, a in rows], here)
+            if index is None:
+                self.notice(origin, "No agents need attention")
                 self.log("jump from %s: nothing needs attention" % origin.key)
                 return
-            key, pane, n = target
-            if key == origin.key and pane == line.get("pane_id"):
-                self.log("jump from %s: already at %s" % (origin.key, pane))
-                return  # Stay at the head until acted on.
+            key, pane, _ = rows[index]
             machine = self.machines.get(key)
-            if machine is None:
-                return
-            self.log("jump from %s to %s %s (row %d)" % (origin.key, key, pane, n))
-            self.io.focus_agent(machine, pane)
-            if n > JUMP_MAX:
-                self.io.notice(origin, "Needs attention on %s: %s" % (machine.label, pane))
-                return
-            # Server focus alone does not move a client showing another machine;
-            # the focus_agent key does, and is harmless when it already shows it.
-            self.io.jump(n)
+            if (key, pane) == here or machine is None:
+                return  # The only agent of its tier: stay.
+            if key == origin.key:
+                self.focus(machine, pane)
+            elif index + 1 > JUMP_MAX:
+                self.focus(machine, pane)
+                self.notice(origin, "Needs attention on %s: %s" % (machine.label, pane))
+            else:
+                self.io.jump(index + 1)
+            self.log("jump from %s to %s %s (row %d) in %.0f ms"
+                     % (origin.key, key, pane, index + 1, (time.monotonic() - started) * 1000))
 
     def _wait_selected(self, key: str, timeout: float = 2.0) -> bool:
         deadline = time.monotonic() + timeout
@@ -670,6 +729,21 @@ class Source(threading.Thread):
         self.log = log
         self.stopped = threading.Event()
         self.proc = None
+        self.write_lock = threading.Lock()
+
+    def send(self, command: dict) -> bool:
+        """Write a command to the follow process; False when it is not connected."""
+        proc = self.proc
+        if proc is None or proc.stdin is None or proc.poll() is not None:
+            return False
+        data = (json.dumps(command, separators=(",", ":")) + "\n").encode()
+        with self.write_lock:
+            try:
+                proc.stdin.write(data)
+                proc.stdin.flush()
+                return True
+            except (OSError, ValueError):
+                return False
 
     def stop(self) -> None:
         self.stopped.set()
@@ -697,7 +771,7 @@ class Source(threading.Thread):
     def follow(self, argv: List[str]) -> bool:
         got = False
         try:
-            self.proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         except OSError as e:
             self.log("source %s: %s" % (self.machine.key, e))
             return False
@@ -732,7 +806,11 @@ class Source(threading.Thread):
                 self.proc.wait(timeout=5)
             except (OSError, subprocess.SubprocessError):
                 pass
-            stream.close()
+            for pipe in (stream, self.proc.stdin):
+                try:
+                    pipe.close()
+                except (OSError, AttributeError):
+                    pass
         return got
 
 
@@ -788,6 +866,7 @@ def run_daemon() -> int:
             if m not in sources:
                 sources[m] = Source(m, argv_for, lines, progress, log)
                 sources[m].start()
+        notifier.channels = {m.key: source for m, source in sources.items()}
 
     log("notifier started with %s" % ", ".join(m.label for m in machines))
     sync_sources(machines)
@@ -802,10 +881,11 @@ def run_daemon() -> int:
                 notifier.handle(key, line)
             except Exception as e:  # never let one line kill the daemon
                 log("handle failed: %r" % e)
-            try:
-                progress.advance(key, int(line.get("ts_ms") or 0))
-            except (TypeError, ValueError):
-                pass
+            if line.get("kind") in LOG_KINDS:
+                try:
+                    progress.advance(key, int(line.get("ts_ms") or 0))
+                except (TypeError, ValueError):
+                    pass
         progress.flush()
         if time.monotonic() - refreshed > MACHINES_REFRESH_S:
             refreshed = time.monotonic()

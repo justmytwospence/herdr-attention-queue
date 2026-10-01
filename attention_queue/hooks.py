@@ -489,15 +489,63 @@ def on_focus() -> int:
     return 0
 
 
+def session_socket(session: str) -> str:
+    """The socket of a herdr session on this host."""
+    base = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "herdr")
+    if session == "default":
+        return os.path.join(base, "herdr.sock")
+    return os.path.join(base, "sessions", session, "herdr.sock")
+
+
+# Agent fields the notifier needs to rebuild the Agents panel order.
+LIST_TOKENS = ("attn", "attn_rank", "attn_ts")
+
+
+def serve_command(command: dict):
+    """A notifier request arriving on `follow`'s input; returns the reply line."""
+    op, req = command.get("op"), command.get("req")
+    reply = {"v": translog.VERSION, "kind": op, "req": req, "ts_ms": time.time_ns() // 10**6}
+    try:
+        if op == "list":
+            agents = []
+            for a in herdr.call("agent.list", {}).get("agents") or []:
+                tokens = a.get("tokens") or {}
+                agents.append({
+                    "pane_id": a.get("pane_id"),
+                    "focused": bool(a.get("focused")),
+                    "tokens": {k: tokens[k] for k in LIST_TOKENS if isinstance(tokens.get(k), str)},
+                })
+            reply["agents"] = agents
+        elif op == "focus":
+            herdr.call("agent.focus", {"target": command.get("pane_id")})
+            reply["ok"] = True
+        elif op == "notice":
+            herdr.call("notification.show", {"title": str(command.get("text") or ""), "sound": "none"})
+            reply["ok"] = True
+        else:
+            return None
+    except (herdr.HerdrError, herdr.Unavailable) as e:
+        reply.update(kind="error", op=op, error=str(e))
+    return reply
+
+
 def follow(session: str, since_ms: int) -> int:
     """Print the session's transition log from since_ms on, then follow it."""
     if not store_mod.valid_session_name(session):
         print("attention-queue: bad session name %r" % session, file=sys.stderr)
         return 2
     directory = os.path.join(store_mod.state_root(), "sessions", session)
+    if not os.environ.get("HERDR_SOCKET_PATH"):
+        os.environ["HERDR_SOCKET_PATH"] = session_socket(session)
     parent = os.getppid()
     try:
-        return translog.follow(directory, since_ms, stop=lambda: os.getppid() != parent)
+        return translog.follow(
+            directory,
+            since_ms,
+            stop=lambda: os.getppid() != parent,
+            commands=sys.stdin,
+            on_command=serve_command,
+        )
     except BrokenPipeError:
         # The reader (usually an ssh session) went away.
         try:
@@ -613,64 +661,6 @@ def navigation_snapshot(store):
     return agents, st["live"]
 
 
-def herdr_cli(args, timeout: float = 8.0):
-    """Run the herdr CLI that started this plugin; its parsed JSON reply, or None.
-
-    Only HERDR_BIN_PATH, never a `herdr` found on PATH: outside herdr (tests,
-    scripts) this must not reach the user's real servers.
-    """
-    binary = os.environ.get("HERDR_BIN_PATH")
-    if not binary:
-        return None
-    try:
-        proc = subprocess.run([binary] + list(args), capture_output=True, text=True, timeout=timeout,
-                              stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0:
-        return None
-    try:
-        return json.loads(proc.stdout) if proc.stdout.strip() else {}
-    except ValueError:
-        return None
-
-
-def saved_machines():
-    """([(id, label)], selected id or None) for the enabled machines saved on this host.
-
-    In the client's order. Only the host running the herdr client has saved
-    machines; elsewhere the list is empty. `selected` is the machine the client
-    shows, None for this one.
-    """
-    machines = herdr_cli(["machine", "list", "--json"], timeout=5)
-    if not isinstance(machines, list):
-        return [], None
-    saved, selected = [], None
-    for m in machines:
-        if not isinstance(m, dict) or not m.get("enabled", True) or not m.get("id"):
-            continue
-        saved.append((str(m["id"]), str(m.get("label") or m.get("target") or m["id"])))
-        if m.get("selected"):
-            selected = str(m["id"])
-    return saved, selected
-
-
-def remote_agents(machines):
-    """[(machine id, raw agents or None)] for the saved machines, fetched in parallel."""
-    import concurrent.futures
-
-    def fetch(machine_id):
-        reply = herdr_cli(["--machine", machine_id, "agent", "list"])
-        agents = ((reply or {}).get("result") or {}).get("agents") if isinstance(reply, dict) else None
-        return agents if isinstance(agents, list) else None
-
-    if not machines:
-        return []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(machines)) as pool:
-        results = list(pool.map(fetch, [m for m, _ in machines]))
-    return [(m, agents) for (m, _), agents in zip(machines, results)]
-
-
 def show_notice(message: str) -> None:
     print("attention-queue: " + message)
     try:
@@ -679,89 +669,41 @@ def show_notice(message: str) -> None:
         pass
 
 
-def switch_client(n: int) -> bool:
-    """Make the herdr client focus its Nth agent row (prefix, then alt+N) through Ghostty.
+def hand_off_jump(store) -> bool:
+    """Ask the notifier to jump, if one follows this server's log.
 
-    herdr has no API to switch the client to another machine; the notifier
-    switches the same way. macOS and Ghostty only.
+    It sees every connected machine and switches the client between them; this
+    server sees only itself. Cheap on purpose: no herdr call, no reconcile.
     """
-    from . import notifier
-
-    osascript = os.environ.get("HERDR_ATTENTION_QUEUE_OSASCRIPT") or "/usr/bin/osascript"
-    if sys.platform != "darwin" and "HERDR_ATTENTION_QUEUE_OSASCRIPT" not in os.environ:
+    if not translog.follower_alive(store.dir):
         return False
-    prefix = notifier.settings().get("prefix_csi") or notifier.PREFIX_SEQUENCE
-    try:
-        proc = subprocess.run([osascript, "-e", notifier.jump_script(n, prefix)], capture_output=True,
-                              text=True, timeout=5, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return proc.stdout.strip() == "sent"
-
-
-def client_jump(machine_id, pane_id: str, remotes) -> bool:
-    """Switch the client to an agent's row by its position in the combined Agents list."""
-    from . import notifier
-
-    try:
-        local = herdr.call("agent.list", {}).get("agents") or []
-    except (herdr.HerdrError, herdr.Unavailable):
-        local = None
-    n = notifier.jump_index([(notifier.LOCAL, local)] + list(remotes), machine_id or notifier.LOCAL, pane_id)
-    return n is not None and n <= notifier.JUMP_MAX and switch_client(n)
-
-
-def jump_remote(machine_id: str, pane_id: str, machines, remotes, selected) -> int:
-    """Focus a remote agent on its server, then switch the client to it."""
-
-    label = dict(machines).get(machine_id, machine_id)
-    place = None
-    for key, agents in remotes:
-        for agent in agents or ():
-            if key == machine_id and agent.get("pane_id") == pane_id:
-                place = (agent.get("tokens") or {}).get(model.ROW_TOKEN, "")[3:] or None
-    focused = herdr_cli(["--machine", machine_id, "agent", "focus", pane_id]) is not None
-    if (focused and selected == machine_id) or client_jump(machine_id, pane_id, remotes):
-        return 0
-    show_notice("Needs attention on %s: %s" % (label, place or pane_id))
-    return 0
+    with store.locked(LOCK_TIMEOUT_S):
+        translog.append(store.dir, [translog.jump_line(navigation_anchor(), time.time_ns() // 10**6)])
+    return True
 
 
 def jump_attention(store):
-    anchor = navigation_anchor()
-    machines, selected = saved_machines()
-    if not machines and translog.follower_alive(store.dir):
-        # This server cannot see the other machines (the client runs elsewhere
-        # and has them saved), but a notifier there follows this log: it jumps
-        # across machines and switches the client.
-        with store.locked(LOCK_TIMEOUT_S):
-            translog.append(store.dir, [translog.jump_line(anchor, time.time_ns() // 10**6)])
-        print("attention-queue: asked the notifier on the client's host to jump")
+    if hand_off_jump(store):
         return 0
-    remotes = remote_agents(machines)
+    # No notifier: jump among this server's agents only.
+    anchor = navigation_anchor()
     for attempt in range(2):
         agents, live = navigation_snapshot(store)
-        choice = navigation.select_across(agents, live, remotes)
-        if choice is not None and choice[0] is not None:
-            return jump_remote(choice[0], choice[1], machines, remotes, selected)
-        target = choice[1] if choice is not None else None
+        target = navigation.select(agents, live, anchor)
         if target is None:
-            show_notice("No agents need attention" + ("" if machines else " on this server"))
+            show_notice("No agents need attention on this server")
             return 0
         expected = navigation.signature(target, live)
         # A fresh reconciled read catches a moved/replaced/closed agent and
         # changes to rendered eligibility. No focus RPC holds the state lock.
         current, live = navigation_snapshot(store)
-        found = navigation.select(current, live)
+        found = navigation.select(current, live, anchor)
         if found is None or navigation.signature(found, live) != expected:
             continue  # Also catches a newly arrived higher-priority agent.
-        if target.pane_id == anchor and selected is None:
-            return 0  # Stay at the head until acted on, even with other work.
+        if target.pane_id == anchor:
+            return 0  # The only agent of its tier: stay.
         try:
             herdr.call("agent.focus", {"target": target.pane_id})
-            if selected is not None:
-                # The client shows another machine (e.g. this ran from the CLI).
-                client_jump(None, target.pane_id, remotes)
             return 0
         except herdr.HerdrError as e:
             # A definitive stale-target rejection permits one fresh selection.
