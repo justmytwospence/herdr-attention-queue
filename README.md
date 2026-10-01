@@ -167,7 +167,8 @@ in `config.json` removes it. The bridge reports:
 
 - **blocked** for every extension dialog (pi's `ui_prompt_start`), so any pi
   extension's questions count, and for any `herdr:blocked` hold;
-- **blocked** when a turn ends by asking you something (see below);
+- **blocked** when a turn ends by asking you something (see below), judged by
+  Jev or, without it, a deterministic rule;
 - **working** while an extension holds `herdr:working`;
 - **waiting** (`bg`) for background work that will wake the agent.
 
@@ -218,15 +219,27 @@ question, or for a decision or go-ahead, as opposed to reporting results or
 making a conditional offer ("I can do X if you want"). If so, the agent shows
 blocked until your next prompt.
 
-It needs `TYPESAFE_API_KEY` in the agent's environment and is otherwise off.
-Each check is one request of about 1,000 tokens (about $0.00005) and 200-300
-ms, made after the turn ends. On 73 labelled turn endings from real sessions it
-caught every question at the default threshold, with 3 false positives (2 of
-them requests made earlier in the message). Tune it in `config.json`:
+Jev needs `TYPESAFE_API_KEY` in the agent's environment. Each check is one
+request of about 1,000 tokens (about $0.00005) and 200-300 ms, made after the
+turn ends. On 73 labelled turn endings from real sessions it caught every
+question at the default threshold, with 3 false positives (2 of them requests
+made earlier in the message).
+
+Without Jev (no key, network error, timeout) a deterministic rule decides: a
+question mark in the message's last paragraphs, or a request for your answer
+without one ("Say go and I'll start", "I'd like your go-ahead before starting
+it", "waiting on your decision"), but not a conditional offer ("say if you want
+it"), a quoted question or a heading. It agreed with Jev on 97% of 223 pi turn
+endings it was tuned on and 92% of 150 unseen Claude Code ones; its misses are
+mostly unusual phrasings and questions asked further up a long message.
+`ask-check` prints which one decided (`"by": "jev"` or `"rule"`). Tune it in
+`config.json`:
 
 ```json
-{"ask_judge": true, "ask_threshold": 0.8, "ask_model": "jev-latest"}
+{"ask_judge": true, "ask_fallback": true, "ask_threshold": 0.8, "ask_model": "jev-latest"}
 ```
+
+`ask_fallback: false` keeps the check Jev-only; `ask_judge: false` turns it off.
 
 ## Claude usage and session names
 

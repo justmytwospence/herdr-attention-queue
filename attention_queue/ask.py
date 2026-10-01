@@ -6,14 +6,22 @@ ordinary finished turn. `attention.py ask-check` asks Jev, TypeSafe's System One
 model, about the turn's final message, so harness hooks (and the pi bridge) can
 report such turns as blocked.
 
-Off without TYPESAFE_API_KEY, or with {"ask_judge": false} in config.json.
-Every failure (no key, network, timeout, bad reply) answers "does not ask".
-On 73 labelled turn endings it found every question at threshold 0.8, with 3
+On 73 labelled turn endings Jev found every question at threshold 0.8, with 3
 false positives, 2 of them requests made earlier in the message.
+
+Without Jev (no TYPESAFE_API_KEY, network error, timeout) a deterministic rule
+decides instead: a question mark in the message's last paragraphs, or a
+request for the user's answer without one ("Say go and I'll start", "I'd like
+your go-ahead"), but not a conditional offer ("say if you want it"). It agreed
+with Jev on 97% of 223 pi turn endings it was tuned on and 92% of 150 unseen
+Claude Code ones; its misses are mostly unusual phrasings and requests made
+further up a long message. {"ask_fallback": false} turns it off;
+{"ask_judge": false} turns off both.
 """
 
 import json
 import os
+import re
 import urllib.request
 from typing import Optional
 
@@ -42,11 +50,65 @@ QUESTION = {
 }
 
 
+# -- the deterministic rule -------------------------------------------------------
+
+_CODE = re.compile(r"```.*?```", re.S)
+# Quoted or inline-code text is someone else's words, not the agent's question.
+_QUOTED = re.compile(r"[\"\u201c][^\"\u201d\n]{0,200}[\"\u201d]|`[^`\n]*`")
+_START = r"(?:^|(?<=[.!:;])\s+|^[-*]\s+|^\d+\.\s+)"
+_NEED = r"(?:go-ahead|ok|okay|approval|decision|answer|call|input|confirmation)"
+_ASK = re.compile(
+    r"(?im)" + _START + r"(?:please\s+)?(?:say|tell me|let me know|confirm|pick|choose|decide)\b"
+    r"(?![^.\n]*\bif\b[^.\n]*\b(?:fails|breaks|wrong|anything|problems?|issues?|questions?)\b)"
+    r"|\b(?:need|needs|want|like|get|have|waiting (?:on|for)|wait for)\s+your\s+" + _NEED + r"\b"
+    r"|\bunless you(?:'d)? (?:say|tell me|want|object|rather)\b"
+    r"|(?:,|\bthen)\s+say (?:go|the word)\b"
+    r"|\brather you decide\b|\bup to you\b"
+    r"|\b(?:waiting|wait) (?:on|for) you\b"
+)
+# "Say if you want it": an offer, unless it offers a choice ("... A or B").
+_OFFER = re.compile(r"(?i)(?:please\s+)?(?:say|tell me|let me know) if you(?:'d)? (?:want|like|prefer)\b[^.?!\n]*")
+TAIL_CHARS = 700
+
+
+def _tail(text: str, chars: int = TAIL_CHARS) -> str:
+    """The last paragraphs, about `chars` long: where a turn's question sits."""
+    paragraphs = [p for p in re.split(r"\n\s*\n", _CODE.sub(" ", text).strip()) if p.strip()]
+    out = ""
+    for paragraph in reversed(paragraphs):
+        if out and len(out) + len(paragraph) > chars:
+            break
+        out = paragraph + "\n\n" + out
+    return out.strip()
+
+
+def rule_asks(text: str) -> bool:
+    """The deterministic fallback: does the message's end ask the user something?"""
+    tail = _QUOTED.sub(" ", _tail(text or ""))
+    for line in tail.splitlines():
+        line = line.strip().rstrip("*_)]").strip()
+        if line.startswith("#"):
+            continue
+        if re.search(r"\?\s*$", line) or re.search(r"\?(?=\s+[A-Z(])", line):
+            return True
+    for match in _ASK.finditer(tail):
+        start = match.start() + len(match.group(0)) - len(match.group(0).lstrip())
+        offer = _OFFER.match(tail, start)
+        if offer and " or " not in offer.group(0):
+            continue
+        return True
+    return False
+
+
+# -- the judge -----------------------------------------------------------------------
+
+
 def settings() -> dict:
     conf = config.load()
     threshold = conf.get("ask_threshold", DEFAULT_THRESHOLD)
     return {
         "enabled": config.enabled("ask_judge"),
+        "fallback": config.enabled("ask_fallback"),
         "threshold": threshold if isinstance(threshold, (int, float)) else DEFAULT_THRESHOLD,
         "model": conf.get("ask_model") if isinstance(conf.get("ask_model"), str) else DEFAULT_MODEL,
     }
@@ -124,14 +186,16 @@ def probability(text: str, model: str = DEFAULT_MODEL, timeout: float = TIMEOUT_
 
 
 def check(payload) -> dict:
-    """{"asks": bool, "p": probability or None, "reason": why not asked, if not}."""
+    """{"asks": bool, "by": "jev" | "rule" | None, "p": Jev's probability or None, "reason"}."""
     conf = settings()
     if not conf["enabled"]:
-        return {"asks": False, "p": None, "reason": "ask_judge is off"}
+        return {"asks": False, "by": None, "p": None, "reason": "ask_judge is off"}
     text = final_message(payload)
     if not text:
-        return {"asks": False, "p": None, "reason": "no final message"}
+        return {"asks": False, "by": None, "p": None, "reason": "no final message"}
     p = probability(text, conf["model"])
-    if p is None:
-        return {"asks": False, "p": None, "reason": "Jev unavailable"}
-    return {"asks": p >= conf["threshold"], "p": round(p, 3)}
+    if p is not None:
+        return {"asks": p >= conf["threshold"], "by": "jev", "p": round(p, 3)}
+    if conf["fallback"]:
+        return {"asks": rule_asks(text), "by": "rule", "p": None, "reason": "Jev unavailable"}
+    return {"asks": False, "by": None, "p": None, "reason": "Jev unavailable"}

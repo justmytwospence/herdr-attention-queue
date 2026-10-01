@@ -71,6 +71,43 @@ class FinalMessageTest(unittest.TestCase):
         self.assertIsNone(ask.final_message({"transcript_path": path + ".missing"}))
 
 
+class RuleTest(unittest.TestCase):
+    ASKS = [
+        "Tests pass.\n\nWant me to push the branch now?",
+        "Two options:\n1. Ship it\n2. Wait\n\n**Which do you prefer?**",
+        "Shall I go ahead with step 2? It takes about an hour.",
+        "Nothing is committed. Say go and I'll start.",
+        "If that trade-off is acceptable, say go and I'll start with the split.",
+        "The re-baseline costs about $4 per persona, so I'd like your go-ahead before starting it.",
+        "Orca's hook edits are still waiting on your decision.",
+        "Tell me if you want this committed separately or together with those.",
+        "- Confirm the account id before I re-run the import.",
+        "I'll keep going unless you'd rather I stop here.",
+    ]
+    DOES_NOT = [
+        "Done. The plugin is pushed and the NUC is synced.",
+        "I can look for an existing package if you'd like to compare.",
+        "If you want it run, say so, or use the notebook.",
+        "Say if you want it.",
+        "If it still fails after that, tell me and I'll dig further.",
+        "The dialog asks \"Do you want to proceed?\" and the rule matches it.",
+        "Run `git status?` to check.",
+        "## Why did it fail?\n\nThe cache was stale. Fixed and pushed.",
+        "Old question?\n\n" + "Then a long report. " * 60 + "\n\nAll done.",
+        "```sh\nread -p 'Continue?' x\n```\n\nThe script is installed.",
+    ]
+
+    def test_questions_and_requests(self):
+        for text in self.ASKS:
+            with self.subTest(text=text):
+                self.assertTrue(ask.rule_asks(text))
+
+    def test_reports_offers_and_quoted_questions(self):
+        for text in self.DOES_NOT:
+            with self.subTest(text=text):
+                self.assertFalse(ask.rule_asks(text))
+
+
 class JudgeTest(unittest.TestCase):
     def setUp(self):
         self.jev = FakeJev()
@@ -84,7 +121,7 @@ class JudgeTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_threshold_and_request(self):
-        self.assertEqual(ask.check({"message": "x" * 5000 + "Want me to push?"}), {"asks": True, "p": 0.95})
+        self.assertEqual(ask.check({"message": "x" * 5000 + "Want me to push?"}), {"asks": True, "by": "jev", "p": 0.95})
         auth, body = self.jev.requests[-1]
         self.assertEqual(auth, "Bearer k")
         self.assertEqual(body["model"], "jev-latest")
@@ -102,10 +139,15 @@ class JudgeTest(unittest.TestCase):
             json.dump({"ask_judge": False}, f)
         self.assertEqual(ask.check({"message": "Go?"})["reason"], "ask_judge is off")
         os.remove(os.path.join(self.config, "config.json"))
+        # Without Jev the rule decides.
         with patch.dict(os.environ, {"TYPESAFE_API_KEY": ""}):
-            self.assertEqual(ask.check({"message": "Go?"})["reason"], "Jev unavailable")
+            self.assertEqual(ask.check({"message": "Go?"}), {"asks": True, "by": "rule", "p": None, "reason": "Jev unavailable"})
+            self.assertFalse(ask.check({"message": "Pushed."})["asks"])
         with patch.dict(os.environ, {"HERDR_ATTENTION_QUEUE_JEV_URL": "http://127.0.0.1:9/none"}):
-            self.assertEqual(ask.check({"message": "Go?"})["reason"], "Jev unavailable")
+            self.assertEqual(ask.check({"message": "Go?"})["by"], "rule")
+            with open(os.path.join(self.config, "config.json"), "w") as f:
+                json.dump({"ask_fallback": False}, f)
+            self.assertEqual(ask.check({"message": "Go?"}), {"asks": False, "by": None, "p": None, "reason": "Jev unavailable"})
         self.assertEqual(ask.check({})["reason"], "no final message")
 
 
@@ -139,7 +181,7 @@ class HarnessCommandTest(HookTestCase):
 
     def test_ask_check_reports_a_question_or_the_else_state(self):
         out = self.hook("ask-check", "--report", "--else", "idle", stdin=json.dumps({"last_assistant_message": "Go?"}))
-        self.assertEqual(json.loads(out), {"asks": True, "p": 0.95})
+        self.assertEqual(json.loads(out), {"asks": True, "by": "jev", "p": 0.95})
         self.assertEqual(self.fake.tokens("w1:p1").get("activity"), "blocked")
         self.jev.p = 0.1
         self.hook("ask-check", "--report", "--else", "idle", stdin=json.dumps({"message": "Pushed."}))
@@ -159,3 +201,9 @@ class HarnessCommandTest(HookTestCase):
         self.fake.set_status("w1:p1", "working")
         self.run_hook("action", "refresh")
         self.assertEqual(self.attn("w1:p1"), "working")
+
+    def test_without_a_key_the_rule_still_marks_questions(self):
+        out = self.hook("ask-check", "--report", "--else", "clear", TYPESAFE_API_KEY="",
+                        stdin=json.dumps({"message": "Tests pass. Want me to push?"}))
+        self.assertEqual(json.loads(out)["by"], "rule")
+        self.assertEqual(self.fake.tokens("w1:p1").get("activity"), "blocked")

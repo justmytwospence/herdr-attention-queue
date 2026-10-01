@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.0
+
+- Without Jev (no `TYPESAFE_API_KEY`, network error, timeout), `ask-check`
+  falls back to a deterministic rule: a question mark in the final message's
+  last paragraphs, or a request for the user's answer without one, but not a
+  conditional offer or quoted text. It agreed with Jev on 97% of the pi turn
+  endings it was tuned on and 92% of unseen Claude Code ones. The verdict says
+  which decided (`by`). `ask_fallback: false` keeps the check Jev-only.
+
 ## 0.13.0
 
 - The pi bridge ships with the plugin (`pi/herdr-attention-bridge.ts`) and the
