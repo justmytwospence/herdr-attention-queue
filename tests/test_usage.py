@@ -24,7 +24,8 @@ SAMPLE = {
 }
 
 
-OK, WARN, CRIT = usage.GAUGE["ok"], usage.GAUGE["warn"], usage.GAUGE["critical"]
+BLOCK, WEEK, MODEL, SPEND = (usage.ICON[k] for k in ("session", "week", "model", "spend"))
+WARN, CRIT = " " + usage.BADGE["warn"], " " + usage.BADGE["critical"]
 
 
 def iso(offset_s):
@@ -43,29 +44,29 @@ class RenderTest(unittest.TestCase):
     def test_shows_only_the_window_on_the_worst_pace(self):
         # Neither has a usable pace yet (a day into the week; the block's reset
         # is further off than a block lasts), so the higher use shows.
-        self.assertEqual(usage.render(SAMPLE, NOW), OK + " 5h 38% 7h55m")
+        self.assertEqual(usage.render(SAMPLE, NOW), BLOCK + " 38% 7h55m")
         data = {"limits": [limit("session", 20, 4 * H), limit("weekly_all", 60, 3 * D)]}
         # 60% after 4 of 7 days projects to 105%: the week is the bottleneck.
-        self.assertEqual(usage.render(data, NOW), WARN + " 7d 60% 3d")
+        self.assertEqual(usage.render(data, NOW), WEEK + " 60% 3d" + WARN)
 
     def test_levels(self):
         cases = [
             # 30% two hours into five: on pace for 75%, fine.
-            ([limit("session", 30, 3 * H)], OK + " 5h 30% 3h0m"),
+            ([limit("session", 30, 3 * H)], BLOCK + " 30% 3h0m"),
             # 45% halfway through: on pace for 90%.
-            ([limit("session", 45, 150 * 60)], OK + " 5h 45% 2h30m"),
+            ([limit("session", 45, 150 * 60)], BLOCK + " 45% 2h30m"),
             # A fast start below 30% is not a problem yet.
-            ([limit("session", 25, 4 * H)], OK + " 5h 25% 4h0m"),
+            ([limit("session", 25, 4 * H)], BLOCK + " 25% 4h0m"),
             # 60% after 2h: hits the cap in 1h20m, before the reset.
-            ([limit("session", 60, 3 * H)], WARN + " 5h 60% 3h0m"),
+            ([limit("session", 60, 3 * H)], BLOCK + " 60% 3h0m" + WARN),
             # 70% after 1.5h: hits the cap in under 40 minutes.
-            ([limit("session", 70, 210 * 60)], CRIT + " 5h 70% 3h30m"),
-            ([limit("weekly_all", 80, 10 * 60)], WARN + " 7d 80% 10m"),
-            ([limit("weekly_all", 92, 10 * 60)], CRIT + " 7d 92% 10m"),
-            ([limit("weekly_all", 100, 2 * D)], CRIT + " 7d 100% 2d"),
+            ([limit("session", 70, 210 * 60)], BLOCK + " 70% 3h30m" + CRIT),
+            ([limit("weekly_all", 80, 10 * 60)], WEEK + " 80% 10m" + WARN),
+            ([limit("weekly_all", 92, 10 * 60)], WEEK + " 92% 10m" + CRIT),
+            ([limit("weekly_all", 100, 2 * D)], WEEK + " 100% 2d" + CRIT),
             # The API's own severity is a floor.
-            ([limit("weekly_all", 10, 2 * D, severity="warning")], WARN + " 7d 10% 2d"),
-            ([limit("weekly_all", 10, 2 * D, severity="limit_reached")], CRIT + " 7d 10% 2d"),
+            ([limit("weekly_all", 10, 2 * D, severity="warning")], WEEK + " 10% 2d" + WARN),
+            ([limit("weekly_all", 10, 2 * D, severity="limit_reached")], WEEK + " 10% 2d" + CRIT),
         ]
         for limits, text in cases:
             with self.subTest(text=text):
@@ -74,28 +75,28 @@ class RenderTest(unittest.TestCase):
     def test_a_fresh_window_is_not_judged_by_its_pace(self):
         # 8% in the first five minutes "projects" to 480%; too early to say.
         data = {"limits": [limit("session", 8, 5 * H - 300), limit("weekly_all", 20, 5 * D)]}
-        self.assertEqual(usage.render(data, NOW), OK + " 7d 20% 5d")
+        self.assertEqual(usage.render(data, NOW), WEEK + " 20% 5d")
 
     def test_level_beats_projection_and_model_caps_count(self):
         data = {"limits": [
             limit("weekly_all", 40, 4 * D),
             limit("weekly_scoped", 91, 4 * D, scope={"model": {"display_name": "Fable"}}),
         ]}
-        self.assertEqual(usage.render(data, NOW), CRIT + " Fable 91% 4d")
+        self.assertEqual(usage.render(data, NOW), MODEL + " 91% 4d" + CRIT)
 
     def test_spend_shows_only_when_it_is_the_problem(self):
         spend = {"percent": 24, "used": {"amount_minor": 3583}, "limit": {"amount_minor": 15000}}
         data = {"limits": [limit("session", 5, 4 * H)], "spend": spend, "extra_usage": {"is_enabled": True}}
-        self.assertEqual(usage.render(data, NOW), OK + " 5h 5% 4h0m")
+        self.assertEqual(usage.render(data, NOW), BLOCK + " 5% 4h0m")
         data["spend"] = dict(spend, percent=95, used={"amount_minor": 14250})
-        self.assertEqual(usage.render(data, NOW), CRIT + " extra $142.50/$150")
+        self.assertEqual(usage.render(data, NOW), SPEND + " $142.50/$150" + CRIT)
         data["extra_usage"] = {"is_enabled": False}
-        self.assertEqual(usage.render(data, NOW), OK + " 5h 5% 4h0m")
-        self.assertEqual(usage.render({"spend": {"percent": 80}}, NOW), WARN + " extra 80%")
+        self.assertEqual(usage.render(data, NOW), BLOCK + " 5% 4h0m")
+        self.assertEqual(usage.render({"spend": {"percent": 80}}, NOW), SPEND + " 80%" + WARN)
 
     def test_older_replies_without_limits(self):
-        self.assertEqual(usage.render({"five_hour": {"utilization": 3}}, NOW), OK + " 5h 3%")
-        self.assertEqual(usage.render({"seven_day": {"utilization": 77.4}}, NOW), WARN + " 7d 77%")
+        self.assertEqual(usage.render({"five_hour": {"utilization": 3}}, NOW), BLOCK + " 3%")
+        self.assertEqual(usage.render({"seven_day": {"utilization": 77.4}}, NOW), WEEK + " 77%" + WARN)
         self.assertIsNone(usage.render({}, NOW))
         self.assertIsNone(usage.render(None, NOW))
         self.assertIsNone(usage.render({"limits": [{"kind": "other", "percent": 99}]}, NOW))
@@ -123,8 +124,8 @@ class CacheTest(unittest.TestCase):
         old = time.time() - usage.TTL_S - 10
         os.utime(usage.cache_path(self.root), (old, old))
         started = []
-        self.assertEqual(usage.current(self.root, lambda: started.append(1)), usage.GAUGE["ok"] + " 5h 50%")
-        self.assertEqual(usage.current(self.root, lambda: started.append(1)), usage.GAUGE["ok"] + " 5h 50%")
+        self.assertEqual(usage.current(self.root, lambda: started.append(1)), usage.ICON["session"] + " 50%")
+        self.assertEqual(usage.current(self.root, lambda: started.append(1)), usage.ICON["session"] + " 50%")
         self.assertEqual(started, [1], "the lock admits one refresh at a time")
         usage.release_refresh(self.root)
         usage.current(self.root, lambda: started.append(2))
@@ -152,7 +153,7 @@ class CacheTest(unittest.TestCase):
     def test_a_fresh_cache_starts_nothing(self):
         with open(usage.cache_path(self.root), "w") as f:
             json.dump({"seven_day": {"utilization": 1}}, f)
-        self.assertEqual(usage.current(self.root, lambda: self.fail("refreshed")), usage.GAUGE["ok"] + " 7d 1%")
+        self.assertEqual(usage.current(self.root, lambda: self.fail("refreshed")), usage.ICON["week"] + " 1%")
 
     def test_refresh_fetches_with_the_claude_token_and_caches(self):
         reply = os.path.join(self.root, "reply.json")

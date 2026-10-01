@@ -153,18 +153,25 @@ holds it while its planners run.
 Two extras, both on by default:
 
 - **`usage`**: on every agent row, whichever agent it is, the one Claude plan
-  window most likely to stop work, with its use and time to reset: the 5-hour
-  block (`5h`), the 7-day window (`7d`), a model's weekly cap (`Fable`), or
-  extra-usage spend (`extra`, only once it is itself nearly spent and extra usage
-  is on). Windows are ranked by level, then by the use projected at their reset
-  at the current pace. The leading gauge is the level, for colouring with
-  `starts_with` rules:
+  window most likely to stop work, with its use and time to reset. Its leading
+  icon names the window:
 
-  | level | gauge | when |
+  | window | icon |
+  |---|---|
+  | 5-hour block | `\U000F0954` (clock) |
+  | 7-day window | `\U000F00ED` (calendar) |
+  | a model's weekly cap | `\U000F0068` (wand) |
+  | extra-usage spend, only once it is itself nearly spent and extra usage is on | `\U000F0114` (cash) |
+
+  Windows are ranked by level, then by the use projected at their reset at the
+  current pace. A trailing badge marks a problem level, for colouring with
+  `contains` rules; ok has none:
+
+  | level | badge | when |
   |---|---|---|
-  | ok | `\U000F0875` | none of the below |
-  | warn | `\U000F029A` | 75% used, or on pace to hit the cap before the reset |
-  | critical | `\U000F0874` | 90% used, or on pace to hit the cap within the hour |
+  | ok | | none of the below |
+  | warn | `\U000F0026` | 75% used, or on pace to hit the cap before the reset |
+  | critical | `\U000F0029` | 90% used, or on pace to hit the cap within the hour |
 
   Pace counts once a fifth of the window has passed and 30% is used; earlier it
   is noise. A non-normal `severity` from the API raises the level. The data comes from
@@ -173,8 +180,8 @@ Two extras, both on by default:
   `~/.claude/.credentials.json`, or `CLAUDE_CODE_OAUTH_TOKEN`). The reply is
   cached in the plugin state directory for 5 minutes; hooks never wait on the
   network, and a stale cache is refreshed by one detached process that then
-  updates every row. Without a Claude login there is no token and no gauge.
-  Render it as in [`examples/config.toml`](examples/config.toml); the gauges
+  updates every row. Without a Claude login there is no token and no usage.
+  Render it as in [`examples/config.toml`](examples/config.toml); the icons
   are Nerd Font glyphs.
 - **Claude session names**: a Claude pane's title and agent label become the
   name Claude Code gave the session (`Claude: wireguard snowflake routing`),

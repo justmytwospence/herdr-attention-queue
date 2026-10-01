@@ -316,8 +316,8 @@ class UsageAndNamesTest(HookTestCase):
         self.fake.add_agent("w1:p1", "working", session="abcdef12-0000-4000-8000-000000000000")
         self.fake.add_agent("w1:p2", "idle", session="/tmp/pi.jsonl", agent="pi")
         self.run_hook("event", event=self.status_event("w1:p1"), CLAUDE_CONFIG_DIR=claude)
-        self.assertEqual(self.fake.tokens("w1:p1").get("usage"), usage.GAUGE["ok"] + " 5h 40%")
-        self.assertEqual(self.fake.tokens("w1:p2").get("usage"), usage.GAUGE["ok"] + " 5h 40%")
+        self.assertEqual(self.fake.tokens("w1:p1").get("usage"), usage.ICON["session"] + " 40%")
+        self.assertEqual(self.fake.tokens("w1:p2").get("usage"), usage.ICON["session"] + " 40%")
         self.assertEqual(self.fake.agents["w1:p1"].get("title"), "cache layer")
         self.assertEqual(self.fake.agents["w1:p1"].get("display_agent"), "Claude: cache layer")
         self.assertNotIn("title", self.fake.agents["w1:p2"])
@@ -340,7 +340,7 @@ class UsageAndNamesTest(HookTestCase):
         extra = {"CLAUDE_CODE_OAUTH_TOKEN": "tok", "HERDR_ATTENTION_QUEUE_USAGE_URL": "file://" + reply}
         self.run_hook("event", event=self.status_event("w1:p1"), **extra)
         deadline = time.time() + 10
-        while time.time() < deadline and self.fake.tokens("w1:p1").get("usage") != usage.GAUGE["warn"] + " 7d 77%":
+        while time.time() < deadline and self.fake.tokens("w1:p1").get("usage") != usage.ICON["week"] + " 77% " + usage.BADGE["warn"]:
             time.sleep(0.05)
-        self.assertEqual(self.fake.tokens("w1:p1").get("usage"), usage.GAUGE["warn"] + " 7d 77%")
+        self.assertEqual(self.fake.tokens("w1:p1").get("usage"), usage.ICON["week"] + " 77% " + usage.BADGE["warn"])
         self.assertFalse(os.path.exists(os.path.join(self.state, "usage.lock")))

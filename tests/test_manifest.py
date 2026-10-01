@@ -76,7 +76,7 @@ class ExampleConfigTest(unittest.TestCase):
             example = tomllib.load(f)
         row = example["ui"]["sidebar"]["agents"]["rows"][0]
         gauge = next(t for t in row if isinstance(t, dict) and t.get("token") == "$usage")
-        self.assertEqual({r["starts_with"] for r in gauge["rules"]}, set(usage.GAUGE.values()))
+        self.assertEqual({r["contains"] for r in gauge["rules"]}, set(usage.BADGE.values()))
 
 
 if __name__ == "__main__":

@@ -8,8 +8,9 @@ text to every agent row. A hook never waits on the network.
 
 The text is the one window most likely to stop work (the 5-hour block, the
 7-day window, a model's weekly cap, or extra-usage spend), judged by its pace
-toward the cap before it resets, e.g. `󰡵 7d 30% 4d`. The leading gauge is the
-level: ok, warn (nearing the cap) or critical (about to hit it).
+toward the cap before it resets, e.g. `󰃭 30% 4d`. The leading icon names the
+window; a trailing badge marks warn (nearing the cap) or critical (about to
+hit it).
 """
 
 import calendar
@@ -204,17 +205,23 @@ CRITICAL_PCT = 90
 # On pace to hit the cap within this long, before the reset: about to be a problem.
 CRITICAL_HORIZON_S = 3600
 LEVELS = ("ok", "warn", "critical")
-# The token starts with a gauge for its level, so display rules can colour it
-# with `starts_with` (they cannot read a number out of the middle of a token).
-GAUGE = {
-    "ok": "\U000F0875",  # nf-md-gauge_low
-    "warn": "\U000F029A",  # nf-md-gauge
-    "critical": "\U000F0874",  # nf-md-gauge_full
+# Which window: the token starts with its icon (Nerd Font).
+ICON = {
+    "session": "\U000F0954",  # nf-md-clock: the 5-hour block
+    "week": "\U000F00ED",  # nf-md-calendar: the 7-day window
+    "model": "\U000F0068",  # nf-md-auto_fix: a model's weekly cap
+    "spend": "\U000F0114",  # nf-md-cash: extra-usage spend
+}
+# A problem level ends the token with a badge, so display rules can colour it
+# with `contains` (they cannot read a number out of the middle of a token).
+BADGE = {
+    "warn": "\U000F0026",  # nf-md-alert
+    "critical": "\U000F0029",  # nf-md-alert_octagon
 }
 
 
 class Window(NamedTuple):
-    label: str
+    kind: str  # an ICON key
     pct: int
     resets_at: Optional[str] = None
     length_s: Optional[int] = None
@@ -241,7 +248,7 @@ def _severity_level(severity) -> Optional[str]:
 def windows(data: dict):
     """Every limit in the usage reply, as Windows."""
     found = []
-    labels = set()
+    seen = set()
     for limit in data.get("limits") or []:
         if not isinstance(limit, dict):
             continue
@@ -250,22 +257,21 @@ def windows(data: dict):
             continue
         kind, group = limit.get("kind"), limit.get("group")
         if kind == "session" or (kind is None and group == "session"):
-            label, length = "5h", SESSION_S
+            window, length = "session", SESSION_S
         elif kind == "weekly_all":
-            label, length = "7d", WEEK_S
+            window, length = "week", WEEK_S
         elif kind == "weekly_scoped":
-            model = ((limit.get("scope") or {}).get("model") or {}).get("display_name")
-            label, length = str(model or "model"), WEEK_S
+            window, length = "model", WEEK_S
         else:
             continue
-        labels.add(label)
-        found.append(Window(label, pct, limit.get("resets_at"), length, limit.get("severity")))
+        seen.add(window)
+        found.append(Window(window, pct, limit.get("resets_at"), length, limit.get("severity")))
     # Older replies have no `limits`; the top-level windows say the same.
-    for key, label, length in (("five_hour", "5h", SESSION_S), ("seven_day", "7d", WEEK_S)):
+    for key, kind, length in (("five_hour", "session", SESSION_S), ("seven_day", "week", WEEK_S)):
         window = data.get(key) if isinstance(data.get(key), dict) else {}
         pct = _pct(window.get("utilization"))
-        if pct is not None and label not in labels:
-            found.append(Window(label, pct, window.get("resets_at"), length))
+        if pct is not None and kind not in seen:
+            found.append(Window(kind, pct, window.get("resets_at"), length))
     spend = data.get("spend") if isinstance(data.get("spend"), dict) else {}
     extra = data.get("extra_usage") if isinstance(data.get("extra_usage"), dict) else {}
     spend_pct = _pct(spend.get("percent"))
@@ -277,7 +283,7 @@ def windows(data: dict):
             detail = "$%.2f/$%.0f" % (used / 100, cap / 100)
         else:
             detail = "%d%%" % spend_pct
-        found.append(Window("extra", spend_pct, severity=spend.get("severity"), detail=detail))
+        found.append(Window("spend", spend_pct, severity=spend.get("severity"), detail=detail))
     return found
 
 
@@ -330,7 +336,11 @@ def bottleneck(data, now: Optional[float] = None) -> Optional[Assessed]:
 
 
 def render(data: Optional[dict], now: Optional[float] = None) -> Optional[str]:
-    """`<gauge> <window> <pct>% <reset>` for the bottleneck window, e.g. `\U000F0875 7d 30% 4d`."""
+    """`<window icon> <pct>% <reset>[ <badge>]` for the bottleneck window.
+
+    E.g. `\U000F00ED 30% 4d` (7-day window, ok) or `\U000F0954 92% 40m \U000F0029`
+    (5-hour block, critical).
+    """
     now = time.time() if now is None else now
     worst = bottleneck(data, now)
     if worst is None:
@@ -341,7 +351,9 @@ def render(data: Optional[dict], now: Optional[float] = None) -> Optional[str]:
     else:
         left = until(w.resets_at, now)
         body = "%d%%%s" % (w.pct, " " + left if left else "")
-    return "%s %s %s" % (GAUGE[worst.level], w.label, body)
+    text = "%s %s" % (ICON[w.kind], body)
+    badge = BADGE.get(worst.level)
+    return text + " " + badge if badge else text
 
 
 def current(state_root: str, start_refresh) -> Optional[str]:
