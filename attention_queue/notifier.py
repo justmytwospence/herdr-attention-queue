@@ -195,6 +195,33 @@ def jump_index(lists: Sequence, machine_key: str, pane_id: str) -> Optional[int]
     return None
 
 
+JUMP_STATES = ("blocked", "done")
+# A jump request is acted on only this soon after it was made: the user is
+# waiting, and a late one (a reconnect replaying the log) would surprise them.
+JUMP_MAX_AGE_MS = 10_000
+
+
+def jump_target(lists: Sequence):
+    """(machine key, pane id, 1-based row) of the highest-priority agent, or None.
+
+    Rows sort like the client's combined Agents list (see jump_index); the
+    target is the first blocked or done one, which is the list's head when
+    anything needs attention.
+    """
+    rows = []
+    for m_index, (key, agents) in enumerate(lists):
+        if agents is None:
+            continue
+        for a_index, agent in enumerate(agents):
+            rows.append((_attn_key(agent), m_index, a_index, key, agent))
+    rows.sort(key=lambda row: row[:3])
+    for index, row in enumerate(rows):
+        agent = row[4]
+        if (agent.get("tokens") or {}).get("attn") in JUMP_STATES and isinstance(agent.get("pane_id"), str):
+            return row[3], agent["pane_id"], index + 1
+    return None
+
+
 def looking_at(front_title: Optional[str], selected: str, focused: Optional[str], machine_key: str, pane_id: str) -> bool:
     """The user is already looking at this pane; every check must pass."""
     return (
@@ -396,6 +423,16 @@ class SystemIO:
     def jump(self, n: int) -> bool:
         return self.osascript(jump_script(n, self.prefix_sequence)) == "sent"
 
+    def notice(self, machine: Machine, text: str) -> None:
+        """A herdr toast on that machine's server (the one the client shows)."""
+        if machine.local:
+            try:
+                self.local_call(machine, "notification.show", {"title": text, "sound": "none"})
+            except (herdr.Unavailable, herdr.HerdrError):
+                pass
+            return
+        self.run([self.herdr, "--machine", machine.key, "notification", "show", text, "--sound", "none"], timeout=10)
+
 
 # -- the notifier ------------------------------------------------------------------
 
@@ -421,6 +458,15 @@ class Notifier:
         pane = line.get("pane_id")
         if machine is None or not isinstance(pane, str):
             return None
+        if line.get("kind") == "jump":
+            try:
+                age = self.io.now_ms() - int(line.get("ts_ms") or 0)
+            except (TypeError, ValueError):
+                return None
+            if age > JUMP_MAX_AGE_MS:
+                return None
+            threading.Thread(target=self.jump_request, args=(machine, line), daemon=True).start()
+            return "jump"
         action = decide(line, self.io.now_ms())
         if line.get("kind") == "focus":
             self.focused[machine_key] = pane
@@ -500,6 +546,46 @@ class Notifier:
                 if self._wait_selected(machine.key):
                     return
             self.log("machine switch to %s not confirmed" % machine.key)
+
+    def agent_lists(self) -> List:
+        """[(machine key, agents or None)] in the client's machine order, fetched in parallel."""
+        with self.lock:
+            machines = [self.machines[k] for k in self.order if k in self.machines]
+        results: Dict[str, Optional[List[dict]]] = {}
+
+        def fetch(machine: Machine) -> None:
+            results[machine.key] = self.io.agents(machine)
+
+        threads = [threading.Thread(target=fetch, args=(m,), daemon=True) for m in machines]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(15)
+        return [(m.key, results.get(m.key)) for m in machines]
+
+    def jump_request(self, origin: Machine, line: dict) -> None:
+        """jump-attention ran on `origin`, which cannot see the other machines."""
+        with self.click_lock:
+            target = jump_target(self.agent_lists())
+            if target is None:
+                self.io.notice(origin, "No agents need attention")
+                self.log("jump from %s: nothing needs attention" % origin.key)
+                return
+            key, pane, n = target
+            if key == origin.key and pane == line.get("pane_id"):
+                self.log("jump from %s: already at %s" % (origin.key, pane))
+                return  # Stay at the head until acted on.
+            machine = self.machines.get(key)
+            if machine is None:
+                return
+            self.log("jump from %s to %s %s (row %d)" % (origin.key, key, pane, n))
+            self.io.focus_agent(machine, pane)
+            if n > JUMP_MAX:
+                self.io.notice(origin, "Needs attention on %s: %s" % (machine.label, pane))
+                return
+            # Server focus alone does not move a client showing another machine;
+            # the focus_agent key does, and is harmless when it already shows it.
+            self.io.jump(n)
 
     def _wait_selected(self, key: str, timeout: float = 2.0) -> bool:
         deadline = time.monotonic() + timeout

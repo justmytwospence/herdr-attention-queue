@@ -730,6 +730,14 @@ def jump_remote(machine_id: str, pane_id: str, machines, remotes, selected) -> i
 def jump_attention(store):
     anchor = navigation_anchor()
     machines, selected = saved_machines()
+    if not machines and translog.follower_alive(store.dir):
+        # This server cannot see the other machines (the client runs elsewhere
+        # and has them saved), but a notifier there follows this log: it jumps
+        # across machines and switches the client.
+        with store.locked(LOCK_TIMEOUT_S):
+            translog.append(store.dir, [translog.jump_line(anchor, time.time_ns() // 10**6)])
+        print("attention-queue: asked the notifier on the client's host to jump")
+        return 0
     remotes = remote_agents(machines)
     for attempt in range(2):
         agents, live = navigation_snapshot(store)

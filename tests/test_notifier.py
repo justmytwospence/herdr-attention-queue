@@ -36,8 +36,12 @@ def attn(pane="w1:p1", state="done", prev="working", ts=NOW - 1000, **extra):
     return line
 
 
+ATTN_OF_RANK = {"0": "blocked", "1": "done", "2": "working", "3": "waiting", "4": "idle", "5": "unknown"}
+
+
 def agent(pane, rank, ts, focused=False):
-    return {"pane_id": pane, "focused": focused, "tokens": {"attn_rank": rank, "attn_ts": ts}}
+    tokens = {"attn_rank": rank, "attn_ts": ts, "attn": ATTN_OF_RANK.get(rank, "idle")}
+    return {"pane_id": pane, "focused": focused, "tokens": tokens}
 
 
 class FakeProc:
@@ -103,6 +107,9 @@ class FakeIO:
     def focus_agent(self, machine, pane):
         self.calls.append(("focus_agent", machine.key, pane))
         return True
+
+    def notice(self, machine, text):
+        self.calls.append(("notice", machine.key, text))
 
     def jump(self, n):
         self.calls.append(("jump", n))
@@ -313,6 +320,56 @@ class NotifierTest(unittest.TestCase):
         self.assertEqual(len(self.io.sent), 2)
         time.sleep(0.1)
         self.assertEqual(self.io.calls, [])
+
+
+class JumpRequestTest(unittest.TestCase):
+    """jump-attention ran on a remote server, which asks the notifier to jump."""
+
+    def setUp(self):
+        self.io = FakeIO()
+        self.n = notifier.Notifier(self.io, [LOCAL_M, NUC, DEV])
+        self.io.lists = {
+            LOCAL: [agent("w1:p1", "1", "0000000000005"), agent("w1:p2", "2", "0000000000001")],
+            "nuc-id": [agent("wH:p1", "2", "0000000000001"), agent("wH:p2", "0", "0000000000009")],
+            "dev-id": None,
+        }
+
+    def jump(self, origin="nuc-id", pane="wH:p1", ts=NOW - 500):
+        self.assertEqual(self.n.handle(origin, {"v": 1, "kind": "jump", "ts_ms": ts, "pane_id": pane}), "jump")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not self.io.calls:
+            time.sleep(0.01)
+        with self.n.click_lock:
+            return list(self.io.calls)
+
+    def test_jumps_to_the_head_of_the_combined_list_on_any_machine(self):
+        self.io.lists["nuc-id"][1] = agent("wH:p2", "1", "0000000000009")
+        self.io.lists[LOCAL][0] = agent("w1:p1", "0", "0000000000005")
+        # Asked from the NUC, the head is a blocked agent on Local.
+        self.assertEqual(self.jump(), [("focus_agent", LOCAL, "w1:p1"), ("jump", 1)])
+
+    def test_blocked_beats_done_and_switching_uses_its_row(self):
+        self.assertEqual(self.jump(origin=LOCAL, pane="w1:p2"), [("focus_agent", "nuc-id", "wH:p2"), ("jump", 1)])
+
+    def test_staying_at_the_head(self):
+        self.assertEqual(self.n.handle("nuc-id", {"kind": "jump", "ts_ms": NOW, "pane_id": "wH:p2"}), "jump")
+        time.sleep(0.2)
+        with self.n.click_lock:
+            self.assertEqual(self.io.calls, [])
+
+    def test_nothing_needs_attention(self):
+        self.io.lists = {LOCAL: [agent("w1:p2", "2", "0000000000001")]}
+        self.assertEqual(self.jump(), [("notice", "nuc-id", "No agents need attention")])
+
+    def test_stale_requests_and_unknown_machines_are_ignored(self):
+        self.assertIsNone(self.n.handle("nuc-id", {"kind": "jump", "ts_ms": NOW - 60_000, "pane_id": "x"}))
+        self.assertIsNone(self.n.handle("nope", {"kind": "jump", "ts_ms": NOW, "pane_id": "x"}))
+        self.assertEqual(self.io.calls, [])
+
+    def test_jump_target(self):
+        lists = [("a", [agent("p1", "2", "1")]), ("b", None), ("c", [agent("p2", "1", "2"), agent("p3", "1", "1")])]
+        self.assertEqual(notifier.jump_target(lists), ("c", "p3", 1))
+        self.assertIsNone(notifier.jump_target([("a", [agent("p1", "3", "1")])]))
 
 
 class MachineListTest(unittest.TestCase):

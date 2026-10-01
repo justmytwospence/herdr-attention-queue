@@ -315,3 +315,35 @@ class AcrossMachinesE2E(HookTestCase):
         self.assertEqual(self.fake.focus[-1], "w1:p2")
         self.assertFalse(any("focus" in c for c in self.cli_calls()))
         self.assertFalse(os.path.exists(os.path.join(self.dir, "osascript.log")))
+
+
+class DelegateToNotifierE2E(HookTestCase):
+    """On a server without saved machines, a jump goes to the notifier reading its log."""
+
+    def session_dir(self):
+        return os.path.join(self.state, "sessions", "default")
+
+    def jump_lines(self):
+        from attention_queue import translog
+
+        try:
+            with open(translog.path(self.session_dir())) as f:
+                return [json.loads(x) for x in f if '"jump"' in x]
+        except OSError:
+            return []
+
+    def test_a_followed_server_asks_the_notifier(self):
+        from attention_queue import translog
+
+        self.fake.add_agent("w1:p1", "done", session="a")
+        self.run_hook("event", event=self.status_event("w1:p1"))
+        translog.touch_alive(self.session_dir())
+        self.run_hook("action", "jump-attention", pane="w1:p9")
+        self.assertIsNone(self.fake.focus)
+        self.assertEqual([(x["kind"], x["pane_id"]) for x in self.jump_lines()], [("jump", "w1:p9")])
+
+    def test_without_a_reader_the_jump_stays_on_this_server(self):
+        self.fake.add_agent("w1:p1", "done", session="a")
+        self.run_hook("action", "jump-attention", pane="w1:p9")
+        self.assertEqual(self.fake.focus[-1], "w1:p1")
+        self.assertEqual(self.jump_lines(), [])

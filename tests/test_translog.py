@@ -87,6 +87,14 @@ class FollowTest(unittest.TestCase):
         translog.append(self.dir, [{"ts_ms": 7}])
         self.assertTrue(self.wait(lambda: [x["ts_ms"] for x in self.seen(out)] == [7]))
 
+    def test_follow_marks_the_log_as_read(self):
+        self.assertFalse(translog.follower_alive(self.dir))
+        self.start(since_ms=0)
+        self.assertTrue(self.wait(lambda: translog.follower_alive(self.dir)))
+        old = time.time() - translog.ALIVE_MAX_AGE_S - 1
+        os.utime(os.path.join(self.dir, translog.ALIVE), (old, old))
+        self.assertFalse(translog.follower_alive(self.dir))
+
     def test_heartbeat(self):
         out, _ = self.start(since_ms=0, heartbeat_s=0.05)
         self.assertTrue(self.wait(lambda: any(x["kind"] == "ping" for x in self.seen(out))))

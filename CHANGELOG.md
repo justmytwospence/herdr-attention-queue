@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0
+
+- `jump-attention` spans machines also while the client shows a remote one.
+  The remote server cannot see the other machines, so it appends a `jump` line
+  to its transition log and the notifier on the client's host, which follows
+  that log, does the cross-machine jump. Without a notifier reading the log,
+  the jump stays on that machine. Restart the notifier after updating.
+
 ## 0.9.0
 
 - `jump-attention` spans every connected machine, like the sidebar: a blocked

@@ -243,8 +243,15 @@ the prefix is not ctrl+b (see Notifications). Otherwise, or above position 9, a
 notice names the machine and agent.
 
 Plugin actions run on the server the client shows, and only the client's own
-host has saved machines. So the jump spans machines while the client shows
-Local; while it shows a remote machine, it selects on that machine only.
+host has saved machines. When the client shows a remote machine, the action
+there cannot see the others, so it hands the jump to the notifier on the
+client's host: it appends a `jump` line to its transition log, which the
+notifier already follows over ssh, and the notifier jumps across machines the
+same way (focus on the agent's server, then the `focus_agent` key). The action
+hands over only while a notifier is reading its log (`follow` keeps
+`follower.alive` in the session state directory fresh); without one, it jumps
+on that machine alone. Requests older than 10 seconds are dropped, so a
+reconnecting notifier never replays one.
 
 ## Multiple machines
 

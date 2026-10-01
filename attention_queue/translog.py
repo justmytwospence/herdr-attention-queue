@@ -15,6 +15,10 @@ Line kinds:
           and done.
   focus  {"v", "kind": "focus", "ts_ms", "pane_id"}: the pane got focus on its
           server.
+  jump   {"v", "kind": "jump", "ts_ms", "pane_id"}: the jump-attention action
+          ran on a server that cannot see the other machines, and asks the
+          notifier on the client's host to jump across machines. `pane_id` is
+          the invoking pane.
   ping   {"v", "kind": "ping", "ts_ms"}: written by `follow` (not the log) every
           30 s, so both ends of an ssh pipe notice when the other is gone.
 """
@@ -29,6 +33,27 @@ VERSION = 1
 NAME = "transitions.jsonl"
 MAX_BYTES = 256 * 1024
 HEARTBEAT_S = 30.0
+# `follow` touches this file while it runs, so a hook can tell that a notifier
+# reads the log (and will act on a jump line).
+ALIVE = "follower.alive"
+ALIVE_TOUCH_S = 15.0
+ALIVE_MAX_AGE_S = 60.0
+
+
+def touch_alive(session_dir: str) -> None:
+    try:
+        with open(os.path.join(session_dir, ALIVE), "a"):
+            pass
+        os.utime(os.path.join(session_dir, ALIVE), None)
+    except OSError:
+        pass
+
+
+def follower_alive(session_dir: str, max_age_s: float = ALIVE_MAX_AGE_S) -> bool:
+    try:
+        return time.time() - os.path.getmtime(os.path.join(session_dir, ALIVE)) < max_age_s
+    except OSError:
+        return False
 
 
 def path(session_dir: str) -> str:
@@ -72,6 +97,13 @@ def follow(
     target = path(session_dir)
     stop = stop or (lambda: False)
     last_write = [time.monotonic()]
+    last_touch = [time.monotonic()]
+    touch_alive(session_dir)
+
+    def alive() -> None:
+        if time.monotonic() - last_touch[0] >= ALIVE_TOUCH_S:
+            touch_alive(session_dir)
+            last_touch[0] = time.monotonic()
 
     def heartbeat() -> None:
         if heartbeat_s and time.monotonic() - last_write[0] >= heartbeat_s:
@@ -102,6 +134,7 @@ def follow(
                 fh = open(target)
             except OSError:
                 heartbeat()
+                alive()
                 time.sleep(poll_s)
                 continue
             partial = ""
@@ -125,6 +158,7 @@ def follow(
             fh = None
             continue
         heartbeat()
+        alive()
         time.sleep(poll_s)
     if fh is not None:
         fh.close()
@@ -151,3 +185,7 @@ def attn_line(t, attn: str, prev: Optional[str], restoring: bool, workspace: Opt
 
 def focus_line(pane_id: str, ts_ms: int) -> dict:
     return {"v": VERSION, "kind": "focus", "ts_ms": ts_ms, "pane_id": pane_id}
+
+
+def jump_line(pane_id: Optional[str], ts_ms: int) -> dict:
+    return {"v": VERSION, "kind": "jump", "ts_ms": ts_ms, "pane_id": pane_id}
