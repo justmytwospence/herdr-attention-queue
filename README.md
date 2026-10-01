@@ -73,7 +73,7 @@ Tokens reported on each agent pane (source `plugin:attention-queue`):
 | `attn_ts` | wall-clock milliseconds when the agent entered its current state, zero-padded |
 | `attn_icon` | a Nerd Font glyph per state (below) |
 | `attn_row` | the glyph, two spaces, and the workspace label, e.g. `\uf058  data-pipeline` |
-| `usage` | Claude plan usage, e.g. `󰥔 38% 7h55m 󰃭 15% 6d 󰁨 8% 󰄔 $154.21/$150 off` (see below) |
+| `usage` | the Claude usage window closest to its cap, e.g. `󰡵 7d 30% 4d` (see below) |
 
 | state | icon | glyph |
 |---|---|---|
@@ -152,17 +152,30 @@ holds it while its planners run.
 
 Two extras, both on by default:
 
-- **`usage`**: the Claude plan gauges on every agent row, whichever agent it is:
-  the 5-hour block and 7-day window with time to reset, each model's weekly cap,
-  and extra-usage spend (`off` when extra usage is disabled). The data comes from
+- **`usage`**: on every agent row, whichever agent it is, the one Claude plan
+  window most likely to stop work, with its use and time to reset: the 5-hour
+  block (`5h`), the 7-day window (`7d`), a model's weekly cap (`Fable`), or
+  extra-usage spend (`extra`, only once it is itself nearly spent and extra usage
+  is on). Windows are ranked by level, then by the use projected at their reset
+  at the current pace. The leading gauge is the level, for colouring with
+  `starts_with` rules:
+
+  | level | gauge | when |
+  |---|---|---|
+  | ok | `\U000F0875` | none of the below |
+  | warn | `\U000F029A` | 75% used, or on pace to hit the cap before the reset |
+  | critical | `\U000F0874` | 90% used, or on pace to hit the cap within the hour |
+
+  Pace counts once a fifth of the window has passed and 30% is used; earlier it
+  is noise. A non-normal `severity` from the API raises the level. The data comes from
   the OAuth usage endpoint Claude Code's `/status` reads, with the token Claude
   Code stores (the macOS Keychain item `Claude Code-credentials`, else
   `~/.claude/.credentials.json`, or `CLAUDE_CODE_OAUTH_TOKEN`). The reply is
   cached in the plugin state directory for 5 minutes; hooks never wait on the
   network, and a stale cache is refreshed by one detached process that then
   updates every row. Without a Claude login there is no token and no gauge.
-  Render it with `{ token = "$usage", dim = true }`; the icons are Nerd Font
-  glyphs.
+  Render it as in [`examples/config.toml`](examples/config.toml); the gauges
+  are Nerd Font glyphs.
 - **Claude session names**: a Claude pane's title and agent label become the
   name Claude Code gave the session (`Claude: wireguard snowflake routing`),
   read from `~/.claude/jobs/<session>/state.json`.

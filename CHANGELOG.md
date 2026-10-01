@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.0
+
+- `activity` pane token: any harness can correct herdr's status with
+  `blocked` (waiting on the user: a question no screen rule knows, or an agent
+  whose integration lost the pane) or `working` (busy outside a turn, such as a
+  plan-mode planner run). Blocked from either source wins; reported working
+  beats idle, done and waiting. The ticker watches the token while it is set.
+- `refresh` action: reconcile now, for integrations that change `activity` or
+  `bg` (token changes emit no plugin event).
+- `usage` shows only the window most likely to stop work, ranked by level and
+  by its projected use at the reset, with a leading gauge for the level: ok,
+  warn (75%, or on pace to hit the cap before the reset) or critical (90%, or on
+  pace to hit it within the hour). Colour it with `starts_with` rules on the
+  gauges (see `examples/config.toml`). Extra-usage spend shows only once it is
+  itself nearly spent.
+
 ## 0.6.0
 
 - Replace `next-attention` / `previous-attention` traversal with a single

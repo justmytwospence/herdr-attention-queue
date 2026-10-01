@@ -69,6 +69,15 @@ class ExampleConfigTest(unittest.TestCase):
         self.assertEqual({r["starts_with"] for r in icon["rules"]}, set(model.ICON.values()))
         self.assertTrue(example["ui"]["window_title"].startswith("herdr "))
 
+    def test_example_rules_cover_every_usage_level(self):
+        from attention_queue import usage
+
+        with open(os.path.join(ROOT, "examples", "config.toml"), "rb") as f:
+            example = tomllib.load(f)
+        row = example["ui"]["sidebar"]["agents"]["rows"][0]
+        gauge = next(t for t in row if isinstance(t, dict) and t.get("token") == "$usage")
+        self.assertEqual({r["starts_with"] for r in gauge["rules"]}, set(usage.GAUGE.values()))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,7 +15,9 @@ window_title = "herdr {hostname}: {workspace}"
 
 [ui.sidebar.agents]
 # One line per agent: the state icon and workspace, coloured by state, then
-# Claude usage. $attn_row is "<icon> <workspace>" as one token, because herdr
+# the Claude usage window closest to its cap, coloured by its leading gauge:
+#   ok \U000F0875  warn (nearing the cap) \U000F029A  critical (about to hit it) \U000F0874
+# $attn_row is "<icon> <workspace>" as one token, because herdr
 # puts " · " between any two row tokens except after its own state_icon.
 # Display rules style a token by its own value, so they match the leading glyph
 # (Nerd Font, written as escapes):
@@ -32,7 +34,11 @@ rows = [
     { starts_with = "\uf252", fg = "#0072d4" },
     { starts_with = "\uf10c", dim = true },
     { starts_with = "\uf059", dim = true },
-  ] }, { token = "$usage", dim = true }],
+  ] }, { token = "$usage", dim = true, rules = [
+    { starts_with = "\U000F0875", fg = "#428b00", dim = true },
+    { starts_with = "\U000F029A", fg = "#a78300", dim = false },
+    { starts_with = "\U000F0874", fg = "#cc6666", bold = true, dim = false },
+  ] }],
 ]
 
 [keys]
