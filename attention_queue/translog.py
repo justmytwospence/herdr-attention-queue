@@ -9,8 +9,10 @@ Line kinds:
 
   attn   {"v", "kind": "attn", "ts_ms", "pane_id", "terminal_id", "workspace_id",
           "tab_id", "agent", "label", "workspace", "attn", "prev", "restoring"}
-          `prev` is null on the first sighting of an agent. `workspace` (the
-          label) is looked up only for blocked and done.
+          `prev` is null on the first sighting of an agent. `workspace` is
+          where the agent is, as on its row (`homelab > navigation` when the
+          workspace has several agents), and is looked up only for blocked
+          and done.
   focus  {"v", "kind": "focus", "ts_ms", "pane_id"}: the pane got focus on its
           server.
   ping   {"v", "kind": "ping", "ts_ms"}: written by `follow` (not the log) every

@@ -209,10 +209,25 @@ def workspace_labels(store: store_mod.Store):
     }
 
 
-def decorate(st: dict, agents, pending: dict, workspaces=None) -> dict:
+def tab_labels(store: store_mod.Store):
+    """{tab_id: label}; empty when herdr cannot say (rows then skip the tab)."""
+    try:
+        tabs = herdr.call("tab.list", {}).get("tabs") or []
+    except (herdr.Unavailable, herdr.HerdrError) as e:
+        debug(store, "tab.list failed: %s" % e)
+        return {}
+    return {
+        t.get("tab_id"): t["label"]
+        for t in tabs
+        if isinstance(t, dict) and isinstance(t.get("label"), str) and t["label"].strip()
+    }
+
+
+def decorate(st: dict, agents, pending: dict, places=None) -> dict:
     """Add usage, the attn_row token and Claude session names to what reconcile wants written.
 
-    `workspaces` maps workspace ids to labels; without it attn_row is left as is.
+    `places` maps pane ids to where the agent is (model.places); without it
+    attn_row is left as is.
     Returns {pane_id: name} for every named Claude pane; a pane whose name is new
     gets an entry in `pending` (possibly with no tokens) so the name is reported.
     """
@@ -224,8 +239,8 @@ def decorate(st: dict, agents, pending: dict, workspaces=None) -> dict:
             want = dict(pending.get(t.pane_id) or {})
             want["usage"] = text
         rec = st["live"].get(t.terminal_id)
-        if workspaces is not None and rec is not None:
-            row = model.row_text(rec["attn"], workspaces.get(t.workspace_id))
+        if places is not None and rec is not None:
+            row = model.row_text(rec["attn"], places.get(t.pane_id))
             if t.tokens.get(model.ROW_TOKEN) != row:
                 want = dict(want if want is not None else pending.get(t.pane_id) or {})
                 want[model.ROW_TOKEN] = row
@@ -243,15 +258,15 @@ def decorate(st: dict, agents, pending: dict, workspaces=None) -> dict:
     return names
 
 
-def log_changes(store: store_mod.Store, st: dict, changes, now_ns: int, workspaces=None) -> None:
+def log_changes(store: store_mod.Store, st: dict, changes, now_ns: int, places=None) -> None:
     """Append attn changes to the transition log (under the session lock)."""
     if not changes:
         return
-    labels_by_id = workspaces or {}
+    places = places or {}
     restoring = restoring_at(st, now_ns)
     lines = []
     for t, prev, rec in changes:
-        workspace = labels_by_id.get(t.workspace_id) if rec["attn"] in ("blocked", "done") else None
+        workspace = places.get(t.pane_id) if rec["attn"] in ("blocked", "done") else None
         lines.append(
             translog.attn_line(
                 t, rec["attn"], prev, restoring, workspace, rec.get("label"), now_ns // 10**6
@@ -267,9 +282,10 @@ def publish(store: store_mod.Store, st: dict, agents, pending: dict, changes, no
     """Write tokens and names, and log the attention changes."""
     st.pop("cleared", None)
     workspaces = workspace_labels(store)
-    names = decorate(st, agents, pending, workspaces)
+    places = model.places(agents, workspaces, tab_labels(store)) if workspaces is not None else None
+    names = decorate(st, agents, pending, places)
     write_tokens(store, st, pending, names)
-    log_changes(store, st, changes, now_ns, workspaces)
+    log_changes(store, st, changes, now_ns, places)
 
 
 def write_tokens(store: store_mod.Store, st: dict, pending: dict, names=None) -> None:

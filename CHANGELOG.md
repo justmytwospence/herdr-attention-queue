@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.0
+
+- `usage` names its window with a leading icon (clock: 5-hour block, calendar:
+  7-day window, wand: a model's cap, cash: extra spend) instead of text, and
+  marks a problem with a trailing badge (alert: warn, octagon: critical).
+  Colour it with `contains` rules on the badges; update display rules that
+  matched the 0.7.0 gauges.
+- `attn_row` tells agents in the same workspace apart: `homelab > navigation`
+  and `homelab > attention queue` by tab, then by agent kind and pane within
+  one tab. Notifier titles use the same place. Hooks on `tab.renamed` and
+  `pane.moved` keep it current.
+
 ## 0.7.0
 
 - `activity` pane token: any harness can correct herdr's status with

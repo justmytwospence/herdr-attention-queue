@@ -58,6 +58,23 @@ class RowTokenTest(HookTestCase):
         self.assertIsNone(self.row("w1:p1"))
         self.assertEqual(f.violations, [])
 
+    def test_agents_sharing_a_workspace_are_told_apart_by_tab(self):
+        f = self.fake
+        f.workspace_names["w1"] = "homelab"
+        f.add_agent("w1:p1", "working", session="a")
+        self.event("w1:p1")
+        self.assertEqual(self.row("w1:p1"), model.ICON["working"] + "  homelab")
+        f.add_agent("w1:p2", "working", session="b")
+        f.agents["w1:p2"]["tab_id"] = "w1:t2"
+        f.tab_names.update({"w1:t1": "navigation", "w1:t2": "attention queue"})
+        self.run_hook("event", event={"event": "pane_agent_detected", "data": {"pane_id": "w1:p2"}})
+        self.assertEqual(self.row("w1:p1"), model.ICON["working"] + "  homelab > navigation")
+        self.assertEqual(self.row("w1:p2"), model.ICON["working"] + "  homelab > attention queue")
+        f.tab_names["w1:t1"] = "nav"
+        self.run_hook("event", event={"event": "tab_renamed", "data": {"tab_id": "w1:t1"}})
+        self.assertEqual(self.row("w1:p1"), model.ICON["working"] + "  homelab > nav")
+        self.assertEqual(f.violations, [])
+
 
 class CompletionSeqE2ETest(HookTestCase):
     def setUp(self):

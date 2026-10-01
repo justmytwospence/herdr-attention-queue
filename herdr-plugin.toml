@@ -1,6 +1,6 @@
 id = "attention-queue"
 name = "Attention Queue"
-version = "0.7.0"
+version = "0.8.0"
 # 0.9.1: the selected machine's view orders every machine's agents together.
 min_herdr_version = "0.9.1"
 description = "Sticky done-until-you-act agent state with waiting for background work, an attention-ordered Agents view across machines, state icons, Claude usage on every row, and a macOS notifier."
@@ -27,9 +27,18 @@ command = ["python3", "-B", "attention.py", "event"]
 on = "pane.closed"
 command = ["python3", "-B", "attention.py", "event"]
 
-# A renamed workspace changes the attn_row token of its agents.
+# A renamed workspace or tab, or a pane moved to another tab, changes the
+# attn_row token of its agents.
 [[events]]
 on = "workspace.renamed"
+command = ["python3", "-B", "attention.py", "event"]
+
+[[events]]
+on = "tab.renamed"
+command = ["python3", "-B", "attention.py", "event"]
+
+[[events]]
+on = "pane.moved"
 command = ["python3", "-B", "attention.py", "event"]
 
 # Logs the focus for the notifier; focusing never changes attention state.

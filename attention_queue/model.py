@@ -316,10 +316,52 @@ def tokens_for(rec: dict) -> Dict[str, str]:
 ROW_GAP = "  "
 
 
-def row_text(attn: str, workspace: Optional[str]) -> str:
-    """`attn_row`: the state icon, a two-space gap, then the workspace label."""
+def row_text(attn: str, place: Optional[str]) -> str:
+    """`attn_row`: the state icon, a two-space gap, then where the agent is."""
     icon = ICON.get(attn, ICON["unknown"])
-    return icon + ROW_GAP + workspace if workspace else icon
+    return icon + ROW_GAP + place if place else icon
+
+
+PLACE_SEP = " > "
+
+
+def places(
+    agents: Sequence[Truth], workspaces: Dict[str, str], tabs: Optional[Dict[str, str]] = None
+) -> Dict[str, Optional[str]]:
+    """{pane_id: where the agent is}, as short as tells agents apart.
+
+    The workspace label alone; with several agents in the workspace, then its
+    tab (`homelab > navigation`); with several in that tab, then the agent kind
+    (`homelab > navigation > claude`), and its pane when even that repeats.
+    """
+    tabs = tabs or {}
+    result: Dict[str, Optional[str]] = {}
+    by_workspace: Dict[Optional[str], list] = {}
+    for t in agents:
+        by_workspace.setdefault(t.workspace_id, []).append(t)
+    for workspace_id, group in by_workspace.items():
+        base = workspaces.get(workspace_id) if workspace_id else None
+        if not base:
+            result.update((t.pane_id, None) for t in group)
+            continue
+        if len(group) == 1:
+            result[group[0].pane_id] = base
+            continue
+        by_tab: Dict[Optional[str], list] = {}
+        for t in group:
+            by_tab.setdefault(t.tab_id if t.tab_id in tabs else None, []).append(t)
+        for tab_id, tab_group in by_tab.items():
+            prefix = base + PLACE_SEP + tabs[tab_id] if tab_id is not None else base
+            if len(tab_group) == 1 and tab_id is not None:
+                result[tab_group[0].pane_id] = prefix
+                continue
+            kinds = [t.agent or "agent" for t in tab_group]
+            for t, kind in zip(tab_group, kinds):
+                name = prefix + PLACE_SEP + kind
+                if kinds.count(kind) > 1:
+                    name += " " + t.pane_id.rsplit(":", 1)[-1]
+                result[t.pane_id] = name
+    return result
 
 
 def durable_from(rec: dict, now_ns: int) -> dict:

@@ -37,6 +37,7 @@ class FakeHerdr:
         self.version = "0.9.1"
         self.rules = {}
         self.workspace_names = {}
+        self.tab_names = {}
         self._seqs = {}
         self._next_seq = 0
         self._lock = threading.Lock()
@@ -182,6 +183,20 @@ class FakeHerdr:
                     "workspaces": [
                         {"workspace_id": w, "label": self.workspace_names.get(w, "ws " + w)}
                         for w in ids
+                    ],
+                }
+            if method == "tab.list":
+                ids = []
+                for pane_id in self.order:
+                    tid = self.agents[pane_id]["tab_id"]
+                    if tid not in ids:
+                        ids.append(tid)
+                return {
+                    "type": "tab_list",
+                    "tabs": [
+                        {"tab_id": t, "workspace_id": t.split(":")[0],
+                         "label": self.tab_names.get(t, t.split(":t")[-1])}
+                        for t in ids
                     ],
                 }
             if method == "ping":
