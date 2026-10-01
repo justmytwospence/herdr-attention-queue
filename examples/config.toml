@@ -49,14 +49,14 @@ prefix = "ctrl+b"
 # sends this key to switch the client to another machine on a click.
 focus_agent = "prefix+alt+1..9"
 
-# Ctrl-b Enter: highest-priority actionable agent on any connected machine
-# (switching machines needs focus_agent above and Ghostty). Stay until acted
-# on; focus never acknowledges.
+# Ctrl-b Enter: the next blocked, working or waiting agent in panel order on
+# any machine, wrapping back to the most urgent (switching machines needs
+# focus_agent above and Ghostty). Focus never acknowledges.
 [[keys.command]]
 key = "prefix+enter"
 type = "plugin_action"
 command = "attention-queue.jump-attention"
-description = "attention: highest-priority agent"
+description = "attention: next active agent"
 
 # Actions run against the focused pane. Carry the same bindings in the config of
 # every herdr server you connect to as a machine.

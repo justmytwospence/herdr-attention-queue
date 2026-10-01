@@ -213,7 +213,7 @@ Turn either off in `config.json` in the plugin config directory
 
 | action | does |
 |---|---|
-| `attention-queue.jump-attention` | focus the next most urgent agent, in panel order, on any connected machine |
+| `attention-queue.jump-attention` | focus the next blocked, working or waiting agent in panel order, on any connected machine |
 | `attention-queue.mark-reviewed` | clear done on the focused agent |
 | `attention-queue.mark-unread` | put the focused idle agent back into done |
 | `attention-queue.mark-all-reviewed` | clear done on every agent on this server |
@@ -223,20 +223,18 @@ Turn either off in `config.json` in the plugin config directory
 
 ### Attention navigation
 
-The example binds **Ctrl-b Enter**. It jumps to the most urgent agents in the
-Agents panel's order, across every connected machine:
+The example binds **Ctrl-b Enter**. It walks the agents that are blocked,
+working or waiting, in the Agents panel's order across every connected machine:
+all blocked agents first, then working, then waiting.
 
-- The tier is every `blocked` agent, or every sticky `done` one when nothing is
-  blocked. Working, waiting, idle and unknown agents are never targets.
-- From outside the tier, go to its first row in the panel.
-- From an agent of the tier, go to the next one in panel order, wrapping around
-  after the last. The only agent of its tier stays put.
-- Nothing needing attention shows a notice.
+- From any other agent (done, idle) or no agent, go to the first, most urgent
+  one.
+- From one of them, go to the next; after the last, wrap back to the first.
+- The only one stays put. With none, a notice says so.
 
-Responding removes a blocked agent from the tier; marking it reviewed (`Ctrl-b
-a`) removes a done one. **Focusing never reviews.** Focus reaches the exact
-pane, including zoomed tabs. The current agent is the pane the action ran from,
-never another client's focus.
+Done and idle agents are left to the panel and the review keys. **Focusing
+never reviews.** Focus reaches the exact pane, including zoomed tabs. The
+current agent is the pane the action ran from, never another client's focus.
 
 The jump runs in the notifier (see Notifications), which already holds an ssh
 pipe to every machine's `follow`:

@@ -618,8 +618,8 @@ class Notifier:
     def jump_request(self, origin: Machine, line: dict) -> None:
         """jump-attention ran on `origin`, the machine the client shows.
 
-        Cycle through the most urgent state's agents in the Agents panel's
-        order across every machine. A target on `origin` is focused on that
+        Walk the blocked, working and waiting agents in the Agents panel's
+        order across every machine (navigation.cycle). A target on `origin` is focused on that
         server; one elsewhere needs the client to switch machines, which only
         the focus_agent key can do.
         """
@@ -629,13 +629,13 @@ class Notifier:
             here = (origin.key, line.get("pane_id"))
             index = navigation.cycle([((k, p), a) for k, p, a in rows], here)
             if index is None:
-                self.notice(origin, "No agents need attention")
+                self.notice(origin, "No agents are blocked, working or waiting")
                 self.log("jump from %s: nothing needs attention" % origin.key)
                 return
             key, pane, _ = rows[index]
             machine = self.machines.get(key)
             if (key, pane) == here or machine is None:
-                return  # The only agent of its tier: stay.
+                return  # The only target: stay.
             if key == origin.key:
                 self.focus(machine, pane)
             elif index + 1 > JUMP_MAX:

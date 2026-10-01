@@ -694,7 +694,7 @@ def jump_attention(store):
         agents, live = navigation_snapshot(store)
         target = navigation.select(agents, live, anchor)
         if target is None:
-            show_notice("No agents need attention on this server")
+            show_notice("No agents are blocked, working or waiting on this server")
             return 0
         expected = navigation.signature(target, live)
         # A fresh reconciled read catches a moved/replaced/closed agent and
@@ -704,7 +704,7 @@ def jump_attention(store):
         if found is None or navigation.signature(found, live) != expected:
             continue  # Also catches a newly arrived higher-priority agent.
         if target.pane_id == anchor:
-            return 0  # The only agent of its tier: stay.
+            return 0  # The only target: stay.
         try:
             herdr.call("agent.focus", {"target": target.pane_id})
             return 0

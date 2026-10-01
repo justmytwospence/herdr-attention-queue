@@ -1,34 +1,39 @@
-"""Pure selection in the rendered, server-local attention queue."""
+"""Pure selection in the rendered attention queue."""
+
+# The states Ctrl-b Enter cycles through, most urgent first. Done and idle
+# agents are left to the panel and the review keys.
+TARGETS = ("blocked", "working", "waiting")
 
 
 def candidates(agents, live):
-    # Python's stable sort preserves agent.list's workspace/tab/pane layout
-    # order for equal millisecond timestamps, matching the sidebar's view.
-    eligible = [t for t in agents if live[t.terminal_id]["attn"] in ("blocked", "done")]
+    """Targets in the Agents panel's order: state, then entry time, then layout.
+
+    Python's stable sort keeps agent.list's workspace/tab/pane layout order for
+    equal milliseconds, like the sidebar's view.
+    """
+    eligible = [t for t in agents if live[t.terminal_id]["attn"] in TARGETS]
     return sorted(eligible, key=lambda t: (
-        0 if live[t.terminal_id]["attn"] == "blocked" else 1,
+        TARGETS.index(live[t.terminal_id]["attn"]),
         live[t.terminal_id]["attn_ns"] // 10**6,
     ))
 
 
 def cycle(rows, here):
-    """Index of the row to jump to, or None when nothing needs attention.
+    """Index of the row to jump to, or None when no row is a target.
 
     `rows` are (key, attn) in the Agents panel's visual order; `here` is the
-    current agent's key. The most urgent state present (blocked, else done)
-    forms the tier. Outside the tier, go to its first row; on a row of the
-    tier, go to the next one, wrapping. A lone tier row that is `here` is
-    returned as is: stay.
+    current agent's key. Targets are blocked, working and waiting rows, in that
+    (panel) order. From anywhere else go to the first target, the most urgent;
+    from a target go to the next one, wrapping after the last. A lone target
+    that is `here` is returned as is: stay.
     """
-    states = {attn for _, attn in rows}
-    tier = next((s for s in ("blocked", "done") if s in states), None)
-    if tier is None:
+    targets = [i for i, (_, attn) in enumerate(rows) if attn in TARGETS]
+    if not targets:
         return None
-    tied = [i for i, (_, attn) in enumerate(rows) if attn == tier]
-    keys = [rows[i][0] for i in tied]
+    keys = [rows[i][0] for i in targets]
     if here in keys:
-        return tied[(keys.index(here) + 1) % len(tied)]
-    return tied[0]
+        return targets[(keys.index(here) + 1) % len(targets)]
+    return targets[0]
 
 
 def select(agents, live, here=None):

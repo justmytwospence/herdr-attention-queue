@@ -345,7 +345,8 @@ class JumpRequestTest(unittest.TestCase):
     def setUp(self):
         self.io = FakeIO()
         self.n = notifier.Notifier(self.io, [LOCAL_M, NUC, DEV])
-        # Panel order: wH:p2 (blocked), w1:p1 (done 5), w1:p3 (done 7), then the working rows.
+        # Panel rows: 1 wH:p2 blocked, 2 w1:p1 done, 3 w1:p3 done, 4 w1:p2 working,
+        # 5 wH:p1 working (same ms as w1:p2: machine order). Targets: 1, 4, 5.
         self.io.lists = {
             LOCAL: [agent("w1:p1", "1", "0000000000005"), agent("w1:p2", "2", "0000000000001"),
                     agent("w1:p3", "1", "0000000000007")],
@@ -361,27 +362,22 @@ class JumpRequestTest(unittest.TestCase):
         with self.n.click_lock:
             return list(self.io.calls)
 
-    def test_most_urgent_first_on_the_same_machine_is_a_server_focus(self):
-        self.assertEqual(self.jump(), [("focus_agent", "nuc-id", "wH:p2")])
+    def test_from_a_done_agent_to_the_most_urgent_with_the_focus_agent_key(self):
+        self.assertEqual(self.jump(origin=LOCAL, pane="w1:p1"), [("jump", 1)])
 
-    def test_another_machine_is_reached_with_the_focus_agent_key_only(self):
-        self.io.lists["nuc-id"][1] = agent("wH:p2", "2", "0000000000009")
-        self.assertEqual(self.jump(), [("jump", 1)])
+    def test_cycles_blocked_working_waiting_across_machines_and_wraps(self):
+        self.assertEqual(self.jump(origin="nuc-id", pane="wH:p2"), [("jump", 4)])
+        self.assertEqual(self.jump(origin=LOCAL, pane="w1:p2"), [("jump", 5)])
+        # Same machine as the client shows: a server focus, no keystroke.
+        self.assertEqual(self.jump(origin="nuc-id", pane="wH:p1"), [("focus_agent", "nuc-id", "wH:p2")])
 
-    def test_ties_cycle_in_panel_order_and_wrap(self):
-        self.io.lists["nuc-id"][1] = agent("wH:p2", "1", "0000000000006")
-        # Done tier in panel order: w1:p1 (5), wH:p2 (6), w1:p3 (7).
-        self.assertEqual(self.jump(origin=LOCAL, pane="w1:p2"), [("focus_agent", LOCAL, "w1:p1")])
-        self.assertEqual(self.jump(origin=LOCAL, pane="w1:p1"), [("jump", 2)])
-        self.assertEqual(self.jump(origin="nuc-id", pane="wH:p2"), [("jump", 3)])
-        self.assertEqual(self.jump(origin=LOCAL, pane="w1:p3"), [("focus_agent", LOCAL, "w1:p1")])
-
-    def test_a_lone_urgent_agent_stays(self):
+    def test_a_lone_target_stays(self):
+        self.io.lists = {LOCAL: [agent("w1:p1", "1", "1")], "nuc-id": [agent("wH:p2", "0", "9")]}
         self.assertEqual(self.jump(pane="wH:p2"), [])
 
     def test_nothing_needs_attention(self):
-        self.io.lists = {LOCAL: [agent("w1:p2", "2", "0000000000001")]}
-        self.assertEqual(self.jump(), [("notice", "nuc-id", "No agents need attention")])
+        self.io.lists = {LOCAL: [agent("w1:p2", "1", "0000000000001"), agent("w1:p3", "4", "2")]}
+        self.assertEqual(self.jump(), [("notice", "nuc-id", "No agents are blocked, working or waiting")])
 
     def test_stale_requests_and_unknown_machines_are_ignored(self):
         self.assertIsNone(self.n.handle("nuc-id", {"kind": "jump", "ts_ms": NOW - 60_000, "pane_id": "x"}))
@@ -398,8 +394,9 @@ class JumpRequestTest(unittest.TestCase):
             "dev-id": FakeChannel(self.n, "dev-id", None),  # connected but silent
         }
         started = time.monotonic()
-        self.assertEqual(self.jump(), [])
+        self.assertEqual(self.jump(pane="w9:p9"), [])
         self.assertLess(time.monotonic() - started, 1.0)
+        # From outside the targets the most urgent is wH:p2, on the NUC: a focus over its pipe.
         self.assertEqual(self.n.channels["nuc-id"].sent[-1], {"op": "focus", "pane_id": "wH:p2"})
 
     def test_panel_rows(self):

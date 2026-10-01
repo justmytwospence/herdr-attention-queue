@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.0
+
+- `jump-attention` cycles through every blocked, working and waiting agent in
+  the Agents panel's order and wraps back to the most urgent one. Done and idle
+  agents are skipped.
+- `activity=idle`: a harness can say its turn is over. The token now stands in
+  for herdr's status, with completions of its own: working to idle by the
+  report is a finished turn (done), herdr's completion signals are ignored
+  while it reports, and herdr's blocked still wins. Codex, which herdr reads
+  as unknown after a response, no longer stays working forever once its hooks
+  report. A plan-mode planner run that ends now shows done.
+
 ## 0.11.0
 
 - `jump-attention` follows the Agents panel's order and cycles: from outside
