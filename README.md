@@ -204,7 +204,7 @@ Turn either off in `config.json` in the plugin config directory
 
 | action | does |
 |---|---|
-| `attention-queue.jump-attention` | focus the highest-priority blocked/sticky-done agent on this server |
+| `attention-queue.jump-attention` | focus the highest-priority blocked/sticky-done agent on any connected machine |
 | `attention-queue.mark-reviewed` | clear done on the focused agent |
 | `attention-queue.mark-unread` | put the focused idle agent back into done |
 | `attention-queue.mark-all-reviewed` | clear done on every agent on this server |
@@ -223,7 +223,7 @@ Repeated presses never cycle, skip the head, or implicitly consume work.
 Empty queues show a best-effort notice.
 Working, waiting, idle and rendered unknown are excluded; detection flaps retain
 the model's existing state. Focus targets the exact agent's workspace/tab/pane,
-including zoomed tabs, without simulating keys or acknowledging its work.
+including zoomed tabs, without acknowledging its work.
 **Viewing never clears sticky done**; use `Ctrl-b a` to mark it reviewed.
 
 The invocation's pane (or plugin context), not another client's server-wide
@@ -231,10 +231,20 @@ focus, determines whether the caller is already at the head. Identity, eligibili
 and highest-priority position are reread before focus; churn permits one reselection. Ambiguous focus timeouts are not retried. No durable cursor,
 state format change, view filtering or acknowledgement is introduced.
 
-The jump selects only on the **selected server/session**, even though the
-sidebar's combined list spans machines. Native Goto and indexed `Alt-1..9` remain
-available across machines. Herdr has no supported client-aware machine-switch
-API; queue navigation deliberately does not use the notifier's Ghostty injection.
+The jump spans **every connected machine**, like the sidebar's combined list. A
+remote agent's state comes from the tokens its own server's plugin wrote (read
+with `herdr --machine <id> agent list`, in parallel); an unreachable machine is
+skipped. The remote agent is focused on its server, and since herdr has no API to
+switch a client to another machine, the client is switched the way the notifier
+does it: Ghostty sends the `focus_agent` key (prefix, then alt+N) for the agent's
+position N in the combined list. That needs macOS, Ghostty, `window_title`
+starting with `herdr `, `focus_agent = "prefix+alt+1..9"` and `prefix_csi` if
+the prefix is not ctrl+b (see Notifications). Otherwise, or above position 9, a
+notice names the machine and agent.
+
+Plugin actions run on the server the client shows, and only the client's own
+host has saved machines. So the jump spans machines while the client shows
+Local; while it shows a remote machine, it selects on that machine only.
 
 ## Multiple machines
 

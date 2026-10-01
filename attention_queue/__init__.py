@@ -1,3 +1,3 @@
 """herdr-attention-queue: sticky, attention-ordered herdr Agents panel."""
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"

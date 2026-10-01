@@ -52,6 +52,8 @@ class HookTestCase(unittest.TestCase):
                 "HERDR_ATTENTION_QUEUE_RESTORE_S": "0",
                 "HERDR_ATTENTION_QUEUE_RESEED_SCHEDULE": "0.05,0.05",
                 "HERDR_ATTENTION_QUEUE_TICK_S": "0.05",
+                # Never send keys to a real terminal.
+                "HERDR_ATTENTION_QUEUE_OSASCRIPT": "/usr/bin/false",
             }
         )
         env.update(extra)

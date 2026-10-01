@@ -1,6 +1,6 @@
 id = "attention-queue"
 name = "Attention Queue"
-version = "0.8.1"
+version = "0.9.0"
 # 0.9.1: the selected machine's view orders every machine's agents together.
 min_herdr_version = "0.9.1"
 description = "Sticky done-until-you-act agent state with waiting for background work, an attention-ordered Agents view across machines, state icons, Claude usage on every row, and a macOS notifier."
@@ -49,7 +49,7 @@ command = ["python3", "-B", "attention.py", "focus"]
 [[actions]]
 id = "jump-attention"
 title = "Attention: jump to highest-priority agent"
-description = "Focus the oldest blocked agent, otherwise oldest sticky done, on this server. Stay there until acted on; never acknowledge just by focusing."
+description = "Focus the oldest blocked agent, otherwise oldest sticky done, on any connected machine. Stay there until acted on; never acknowledge just by focusing."
 contexts = ["global"]
 command = ["python3", "-B", "attention.py", "action", "jump-attention"]
 

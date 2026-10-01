@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0
+
+- `jump-attention` spans every connected machine, like the sidebar: a blocked
+  agent on the NUC now beats a done one on Local. Remote agents are focused on
+  their server, and the client is switched to them with the notifier's Ghostty
+  `focus_agent` key (macOS); elsewhere a notice names the machine and agent.
+  It spans machines while the client shows Local, whose host has the saved
+  machines.
+
 ## 0.8.1
 
 - Places use ` › ` between parts (`homelab › navigation`) instead of ` > `.
