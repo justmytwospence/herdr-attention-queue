@@ -220,5 +220,26 @@ class ClaudeNameTest(unittest.TestCase):
         self.assertIsNone(labels.claude_name(None))
 
 
+class TokenCommandTest(unittest.TestCase):
+    def setUp(self):
+        self.saved = {k: os.environ.get(k) for k in ("ATTENTION_QUEUE_CLAUDE_TOKEN_CMD", "CLAUDE_CODE_OAUTH_TOKEN")}
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_command_wins_over_env_token(self):
+        os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = "setup-token"
+        os.environ["ATTENTION_QUEUE_CLAUDE_TOKEN_CMD"] = "echo  fresh-token "
+        self.assertEqual(usage.access_token(), "fresh-token")
+
+    def test_failing_command_gives_none(self):
+        os.environ["ATTENTION_QUEUE_CLAUDE_TOKEN_CMD"] = "false"
+        self.assertIsNone(usage.access_token())
+
+
 if __name__ == "__main__":
     unittest.main()

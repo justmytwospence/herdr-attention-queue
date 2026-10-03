@@ -1,7 +1,9 @@
 """Claude plan usage on every agent row: the `usage` token.
 
 Reads the same OAuth usage endpoint Claude Code's /status uses, with the token
-Claude Code stores (macOS Keychain, or ~/.claude/.credentials.json), and caches
+Claude Code stores (macOS Keychain, or ~/.claude/.credentials.json), or the one
+printed by $ATTENTION_QUEUE_CLAUDE_TOKEN_CMD when set (a herdr-machine0 hub,
+which holds no Claude Code login, sets it to `spoke token anthropic`), and caches
 the reply in the plugin state directory. Hooks only ever read the cache; when it
 is stale they start one detached refresh, which fetches and then pushes the new
 text to every agent row. A hook never waits on the network.
@@ -16,6 +18,7 @@ hit it).
 import calendar
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -50,7 +53,22 @@ def read_cache(state_root: str) -> Tuple[Optional[dict], float]:
     return (data if isinstance(data, dict) else None), age
 
 
+def command_token() -> Optional[str]:
+    """The token printed by $ATTENTION_QUEUE_CLAUDE_TOKEN_CMD, if that is set."""
+    command = os.environ.get("ATTENTION_QUEUE_CLAUDE_TOKEN_CMD")
+    if not command:
+        return None
+    try:
+        proc = subprocess.run(shlex.split(command), capture_output=True, text=True, timeout=30)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    token = proc.stdout.strip() if proc.returncode == 0 else ""
+    return token or None
+
+
 def access_token() -> Optional[str]:
+    if os.environ.get("ATTENTION_QUEUE_CLAUDE_TOKEN_CMD"):
+        return command_token()
     token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
     if token:
         return token

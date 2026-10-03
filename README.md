@@ -270,7 +270,11 @@ Two extras, both on by default:
   is noise. A non-normal `severity` from the API raises the level. The data comes from
   the OAuth usage endpoint Claude Code's `/status` reads, with the token Claude
   Code stores (the macOS Keychain item `Claude Code-credentials`, else
-  `~/.claude/.credentials.json`, or `CLAUDE_CODE_OAUTH_TOKEN`). The reply is
+  `~/.claude/.credentials.json`, or `CLAUDE_CODE_OAUTH_TOKEN`). When
+  `ATTENTION_QUEUE_CLAUDE_TOKEN_CMD` is set in the herdr server's environment,
+  the token is whatever that command prints instead; a
+  [herdr-machine0](https://github.com/justmytwospence/herdr-machine0) hub, which
+  has no Claude Code login of its own, sets it to `spoke token anthropic`. The reply is
   cached in the plugin state directory for 5 minutes; hooks never wait on the
   network, and a stale cache is refreshed by one detached process that then
   updates every row. Without a Claude login there is no token and no usage.
